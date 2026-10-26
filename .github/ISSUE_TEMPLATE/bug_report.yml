@@ -1,0 +1,46 @@
+name: Bug Report / Сбой на устройстве
+description: Сообщить о проблеме с подключением привилегий, OEM-прошивкой или работой фич
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо за помощь в улучшении **SwagDroid**! Пожалуйста, заполните данные вашего устройства.
+  - type: input
+    id: device_model
+    attributes:
+      label: Бренд и модель устройства
+      description: Например, Xiaomi Poco F5 / Samsung Galaxy S24 / Google Pixel 8
+      placeholder: "Xiaomi 14 / Pixel 8 Pro"
+    validations:
+      required: true
+  - type: input
+    id: android_version
+    attributes:
+      label: Версия Android и прошивка (OEM оболочка)
+      description: Укажите версию Android и оболочку (HyperOS 2.0, MIUI 14, OneUI 6.1, ColorOS 15, AOSP)
+      placeholder: "Android 15 (HyperOS 2.0.4.0)"
+    validations:
+      required: true
+  - type: dropdown
+    id: privilege_mode
+    attributes:
+      label: Режим запуска привилегий (Backend)
+      options:
+        - "Wireless ADB (Встроенная отладка по Wi-Fi без ПК)"
+        - "Root — KernelSU / KernelSU-Next"
+        - "Root — Magisk"
+        - "Root — APatch"
+        - "Shizuku Bridge (Через запущенный Shizuku)"
+        - "Tier 0 (Без привилегий)"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Лог шагов онбординга / Стектрейс
+      description: Скопируйте лог из экрана «Диагностика и Привилегии» в приложении
+      render: shell
+    validations:
+      required: false
