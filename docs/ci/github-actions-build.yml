@@ -17,35 +17,49 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK 21 (Temurin)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
-          java-version: "21"
+          java-version: 21
           distribution: "temurin"
           cache: "gradle"
-
-      - name: Setup Android SDK 37
-        uses: android-actions/setup-android@v3
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Run all JUnit4 module tests across all 11 modules
-        run: ./gradlew testDebugUnitTest --stacktrace
+      - name: Run JUnit4 tests across all 11 modules
+        run: |
+          set -o pipefail
+          if ! ./gradlew testDebugUnitTest --stacktrace --no-daemon > /tmp/gradle_test.log 2>&1; then
+            tail -n 60 /tmp/gradle_test.log
+            ERR_MSG=$(grep -E "e: |FAILURE:|Caused by:|Execution failed|AssertionError" /tmp/gradle_test.log | tail -n 15 | tr '\n' ' | ')
+            echo "::error title=Unit Test / Compile Error::${ERR_MSG:-See step log}"
+            cat /tmp/gradle_test.log
+            exit 1
+          fi
+          tail -n 25 /tmp/gradle_test.log
 
       - name: Assemble Debug & R8-Optimized Release APKs
-        run: ./gradlew assembleDebug assembleRelease --stacktrace
+        run: |
+          set -o pipefail
+          if ! ./gradlew assembleDebug assembleRelease --stacktrace --no-daemon > /tmp/gradle_build.log 2>&1; then
+            ERR_MSG=$(grep -E "e: |FAILURE:|Caused by:|Execution failed|Missing class|AGPBI:" /tmp/gradle_build.log | tail -n 18 | tr '\n' ' | ')
+            echo "::error title=APK Build Error::${ERR_MSG:-See step log}"
+            cat /tmp/gradle_build.log
+            exit 1
+          fi
+          ls -lh app/build/outputs/apk/debug/*.apk app/build/outputs/apk/release/*.apk
 
       - name: Upload SwagDroid v1.0.0 Release APK (R8 Optimized & Signed)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: SwagDroid-v1.0.0-release-apk
           path: app/build/outputs/apk/release/*.apk
 
       - name: Upload SwagDroid v1.0.0 Debug APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: SwagDroid-v1.0.0-debug-apk
           path: app/build/outputs/apk/debug/*.apk
