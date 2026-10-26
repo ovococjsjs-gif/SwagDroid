@@ -15,8 +15,8 @@ android {
         applicationId = "com.swagdroid"
         minSdk = 28
         targetSdk = 37
-        versionCode = 3
-        versionName = "0.3.0-alpha3"
+        versionCode = 4
+        versionName = "0.4.0-rc1"
 
         vectorDrawables {
             useSupportLibrary = true
@@ -68,6 +68,8 @@ dependencies {
     implementation(project(":feature:fixer"))
     implementation(project(":feature:optimizer"))
     implementation(project(":feature:cleaner"))
+    implementation(project(":feature:adblock"))
+    implementation(project(":feature:security"))
 
     val composeBom = platform(libs.androidx.compose.bom)
     implementation(composeBom)

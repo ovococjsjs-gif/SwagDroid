@@ -21,6 +21,8 @@
         tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
         android:name=".SwagDroidApplication"
@@ -44,6 +46,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Split-Route DNS-Only Local Sinkhole VPN (Mode 1: No-Root AdBlock) -->
+        <service
+            android:name="com.swagdroid.feature.adblock.vpn.SwagDnsVpnService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            android:permission="android.permission.BIND_VPN_SERVICE">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Local split-route RFC-1035 DNS sinkhole for ad, tracker, and miner protection" />
+        </service>
 
         <!-- Shizuku Binder Provider for Zero-PC UID 2000 / Root System Access -->
         <provider

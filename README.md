@@ -36,12 +36,15 @@ SwagDroid/
 │   ├── dashboard/         # Главный экран «Пульс», мастер Беспроводного ADB, Root-советник и журнал StateVault
 │   ├── fixer/             # Доктор системы: 53 диагностики и авто-ремонта по всем 12 подсистемам телефона + Реаниматор пушей
 │   ├── optimizer/         # Оптимизатор PRO v2: 7 пресетов + JSON, 24 твика, Тюнер UI, Game Mode, ART и Debloater (4 123 UAD-ng)
-│   └── cleaner/           # Умная очистка с двухконтурной Бронёй паролей/автозаполнения, Сейфом мессенджеров и Дедупликатором
+│   ├── cleaner/           # Умная очистка с двухконтурной Бронёй паролей/автозаполнения, Сейфом мессенджеров и Дедупликатором
+│   ├── adblock/           # 3-режимный AdBlock (Split-route RFC-1035 DNS VPN / Системный DoT без слота VPN / Root systemless hosts)
+│   └── security/          # Антивирус (Bloom SHA-256), Анти-Майнер (XMRig/Stratum), Карантин StateVault и Радар трекеров Exodus DEX
 └── docs/
-    ├── RESEARCH_AND_PLAN.md                  # Полный инженерный ресерч и дорожная карта этапов 1–5
-    ├── STAGE2_FIXER_AND_OPTIMIZER_CATALOG.md # Каталог 12 подсистем Фиксера и базы Оптимизатора
-    ├── STAGE3_CLEANER_AND_OPTIMIZER_PRO.md   # Архитектура Брони паролей в Очистке и расширения Оптимизатора PRO v2
-    └── ci/github-actions-build.yml           # Готовый workflow облачной сборки APK (активируется на финальном этапе)
+    ├── RESEARCH_AND_PLAN.md                       # Полный инженерный ресерч и дорожная карта этапов 1–5
+    ├── STAGE2_FIXER_AND_OPTIMIZER_CATALOG.md      # Каталог 12 подсистем Фиксера и базы Оптимизатора
+    ├── STAGE3_CLEANER_AND_OPTIMIZER_PRO.md        # Архитектура Брони паролей в Очистке и расширения Оптимизатора PRO v2
+    ├── STAGE4_SECURITY_ANTIVIRUS_AND_ADBLOCK.md   # Архитектура Антивируса/Анти-Майнера, Карантина и 3-режимного AdBlock
+    └── ci/github-actions-build.yml                # Готовый workflow облачной сборки APK (активируется на финальном этапе)
 ```
 
 ---
