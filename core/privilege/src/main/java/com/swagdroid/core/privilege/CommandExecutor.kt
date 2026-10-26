@@ -177,8 +177,8 @@ class AndroidCommandExecutor @Inject constructor(
         val outList = ArrayList<String>()
         val errList = ArrayList<String>()
         val job = Shell.cmd(command).to(outList, errList)
-        val result = runCatching {
-            val future = job.submit()
+        val result = runCatching<Shell.Result> {
+            val future = job.enqueue()
             future.get(timeoutMs, TimeUnit.MILLISECONDS)
         }.getOrElse { err ->
             return ShellExecResult(
