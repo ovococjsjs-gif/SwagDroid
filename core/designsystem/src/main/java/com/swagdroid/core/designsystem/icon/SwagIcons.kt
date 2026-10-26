@@ -256,6 +256,85 @@ object SwagIcons {
         }
     }
 
+    val Search: ImageVector by lazy {
+        strokeIcon("Search") {
+            moveTo(15.5f, 10.5f)
+            curveTo(15.5f, 13.5f, 13.0f, 16.0f, 10.0f, 16.0f)
+            curveTo(7.0f, 16.0f, 4.5f, 13.5f, 4.5f, 10.5f)
+            curveTo(4.5f, 7.5f, 7.0f, 5.0f, 10.0f, 5.0f)
+            curveTo(13.0f, 5.0f, 15.5f, 7.5f, 15.5f, 10.5f)
+            close()
+            moveTo(14.2f, 14.7f)
+            lineTo(19.5f, 20.0f)
+        }
+    }
+
+    val Wifi: ImageVector by lazy {
+        strokeIcon("Wifi") {
+            moveTo(2.8f, 8.8f)
+            curveTo(7.9f, 4.2f, 16.1f, 4.2f, 21.2f, 8.8f)
+            moveTo(6.2f, 12.4f)
+            curveTo(9.5f, 9.5f, 14.5f, 9.5f, 17.8f, 12.4f)
+            moveTo(9.6f, 16.0f)
+            curveTo(11.0f, 14.8f, 13.0f, 14.8f, 14.4f, 16.0f)
+            moveTo(12f, 19.2f)
+            horizontalLineTo(12.1f)
+        }
+    }
+
+    val Bell: ImageVector by lazy {
+        strokeIcon("Bell") {
+            moveTo(18f, 16f)
+            verticalLineTo(11f)
+            curveTo(18f, 7.7f, 15.3f, 5f, 12f, 5f)
+            curveTo(8.7f, 5f, 6f, 7.7f, 6f, 11f)
+            verticalLineTo(16f)
+            lineTo(4f, 18f)
+            horizontalLineTo(20f)
+            close()
+            moveTo(12f, 3f)
+            verticalLineTo(5f)
+            moveTo(10f, 18f)
+            curveTo(10.3f, 19.4f, 11.1f, 20.2f, 12f, 20.2f)
+            curveTo(12.9f, 20.2f, 13.7f, 19.4f, 14f, 18f)
+        }
+    }
+
+    val Snowflake: ImageVector by lazy {
+        strokeIcon("Snowflake") {
+            moveTo(12f, 3f)
+            verticalLineTo(21f)
+            moveTo(4.2f, 7.5f)
+            lineTo(19.8f, 16.5f)
+            moveTo(19.8f, 7.5f)
+            lineTo(4.2f, 16.5f)
+            moveTo(9.5f, 5f)
+            lineTo(12f, 7f)
+            lineTo(14.5f, 5f)
+            moveTo(9.5f, 19f)
+            lineTo(12f, 17f)
+            lineTo(14.5f, 19f)
+        }
+    }
+
+    val Sparkles: ImageVector by lazy {
+        strokeIcon("Sparkles") {
+            moveTo(12f, 3.5f)
+            lineTo(13.8f, 8.8f)
+            lineTo(19.2f, 10.5f)
+            lineTo(13.8f, 12.2f)
+            lineTo(12f, 17.5f)
+            lineTo(10.2f, 12.2f)
+            lineTo(4.8f, 10.5f)
+            lineTo(10.2f, 8.8f)
+            close()
+            moveTo(18.5f, 16f)
+            verticalLineTo(20.5f)
+            moveTo(16.2f, 18.2f)
+            horizontalLineTo(20.8f)
+        }
+    }
+
     private fun strokeIcon(
         name: String,
         block: androidx.compose.ui.graphics.vector.PathBuilder.() -> Unit,

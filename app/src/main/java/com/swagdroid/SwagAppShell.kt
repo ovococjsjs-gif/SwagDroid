@@ -31,6 +31,8 @@ import com.swagdroid.core.designsystem.icon.SwagIcons
 import com.swagdroid.core.model.RiskLevel
 import com.swagdroid.core.model.SwagTab
 import com.swagdroid.feature.dashboard.DashboardRoute
+import com.swagdroid.feature.fixer.FixerRoute
+import com.swagdroid.feature.optimizer.OptimizerRoute
 
 @Composable
 fun SwagAppShell() {
@@ -72,37 +74,10 @@ fun SwagAppShell() {
                 )
             }
             SwagTab.FIXER -> {
-                ModuleBlueprintScreen(
-                    title = "Программный Фиксер (Этап 2)",
-                    subtitle = "Автоматическая диагностика смартфона и лечение с точками отката StateVault",
-                    icon = SwagIcons.Fixer,
-                    plannedFeatures = listOf(
-                        "Диагностика и фикс «Wi-Fi подключён, без интернета» (зеркала Captive Portal)" to RiskLevel.SAFE,
-                        "Мягкий сброс сетевого стека без удаления паролей Wi-Fi и привязок часов" to RiskLevel.SAFE,
-                        "Починка пуш-уведомлений мессенджеров и банков (Doze + Standby Bucket + AppOps)" to RiskLevel.SAFE,
-                        "Поиск виновника ночного жора батареи (WakeLocks / MediaScanner .nomedia)" to RiskLevel.ADVANCED,
-                        "Устранение ошибки «Приложение не установлено» (хвосты DELETE_KEEP_DATA)" to RiskLevel.SAFE,
-                        "Восстановление сбитого DPI, цветов экрана, звука Bluetooth и WebView" to RiskLevel.ADVANCED,
-                    ),
-                    onBackToDashboard = { currentTab = SwagTab.DASHBOARD },
-                    modifier = Modifier.padding(innerPadding),
-                )
+                FixerRoute(contentPadding = innerPadding)
             }
             SwagTab.OPTIMIZER -> {
-                ModuleBlueprintScreen(
-                    title = "Оптимизатор и Debloater (Этап 2)",
-                    subtitle = "Аналог Windows Optimizer + база пакетов Universal Android Debloater NG",
-                    icon = SwagIcons.Optimizer,
-                    plannedFeatures = listOf(
-                        "Заморозка и отключение системного bloatware с понятным описанием каждого пакета" to RiskLevel.SAFE,
-                        "Отключение скрытой телеметрии, рекламных демонов (MSA) и фонового скана Wi-Fi/BT" to RiskLevel.SAFE,
-                        "Защита буфера обмена (Clipboard Guard через AppOps READ_CLIPBOARD)" to RiskLevel.SAFE,
-                        "ART App Booster (speed-profile компиляция всех приложений + sm fstrim)" to RiskLevel.SAFE,
-                        "Управление Phantom Process Killer и Cached Apps Freezer (Android 12–16)" to RiskLevel.ADVANCED,
-                    ),
-                    onBackToDashboard = { currentTab = SwagTab.DASHBOARD },
-                    modifier = Modifier.padding(innerPadding),
-                )
+                OptimizerRoute(contentPadding = innerPadding)
             }
             SwagTab.CLEANER -> {
                 ModuleBlueprintScreen(

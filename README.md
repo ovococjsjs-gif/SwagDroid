@@ -33,9 +33,13 @@ SwagDroid/
 │   ├── privilege/         # Движок команд (Local / Shizuku UID 2000 / Root libsu) + паспорт и Root-советник
 │   └── vault/             # Транзакционное хранилище точек восстановления Room + LIFO-откат
 ├── feature/
-│   └── dashboard/         # Главный экран «Пульс», мастер Беспроводного ADB, Root-советник и журнал StateVault
+│   ├── dashboard/         # Главный экран «Пульс», мастер Беспроводного ADB, Root-советник и журнал StateVault
+│   ├── fixer/             # Доктор системы: 52 диагностики и авто-ремонта по всем 12 подсистемам телефона + Реаниматор пушей
+│   └── optimizer/         # Оптимизатор: 4 пресета в 1 клик, живые твики ядра/приватности и Debloater (4 123 пакета UAD-ng)
 └── docs/
-    └── RESEARCH_AND_PLAN.md  # Полный инженерный ресерч и дорожная карта этапов 1–5
+    ├── RESEARCH_AND_PLAN.md                  # Полный инженерный ресерч и дорожная карта этапов 1–5
+    ├── STAGE2_FIXER_AND_OPTIMIZER_CATALOG.md # Каталог 12 подсистем Фиксера и базы Оптимизатора
+    └── ci/github-actions-build.yml           # Готовый workflow облачной сборки APK (активируется на финальном этапе)
 ```
 
 ---
@@ -52,7 +56,7 @@ SwagDroid/
 Готовый APK появится в `app/build/outputs/apk/debug/app-debug.apk`.
 
 ### Автоматическая облачная сборка (GitHub Actions)
-В репозитории настроен пайплайн [`.github/workflows/build.yml`](.github/workflows/build.yml), который при каждом `push` или `pull_request` прогоняет модульные тесты и собирает свежий артефакт **`SwagDroid-debug-apk`**.
+Готовый шаблон пайплайна подготовлен в [`docs/ci/github-actions-build.yml`](docs/ci/github-actions-build.yml) для сборки финального APK после завершения всех этапов разработки.
 
 ---
 
