@@ -26,31 +26,14 @@ jobs:
           distribution: "temurin"
           cache: "gradle"
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
-      - name: Run JUnit4 tests across all 11 modules
+      - name: Run Tests & Build Debug + R8 Release APKs
         run: |
-          set -o pipefail
-          if ! ./gradlew testDebugUnitTest --stacktrace --no-daemon > /tmp/gradle_test.log 2>&1; then
-            tail -n 60 /tmp/gradle_test.log
-            ERR_MSG=$(grep -E "e: |FAILURE:|Caused by:|Execution failed|AssertionError" /tmp/gradle_test.log | tail -n 15 | tr '\n' ' | ')
-            echo "::error title=Unit Test / Compile Error::${ERR_MSG:-See step log}"
-            cat /tmp/gradle_test.log
-            exit 1
+          if [ -f ./scripts/ci-build.sh ]; then
+            bash ./scripts/ci-build.sh
+          else
+            chmod +x ./gradlew
+            ./gradlew testDebugUnitTest assembleDebug assembleRelease --stacktrace --no-daemon
           fi
-          tail -n 25 /tmp/gradle_test.log
-
-      - name: Assemble Debug & R8-Optimized Release APKs
-        run: |
-          set -o pipefail
-          if ! ./gradlew assembleDebug assembleRelease --stacktrace --no-daemon > /tmp/gradle_build.log 2>&1; then
-            ERR_MSG=$(grep -E "e: |FAILURE:|Caused by:|Execution failed|Missing class|AGPBI:" /tmp/gradle_build.log | tail -n 18 | tr '\n' ' | ')
-            echo "::error title=APK Build Error::${ERR_MSG:-See step log}"
-            cat /tmp/gradle_build.log
-            exit 1
-          fi
-          ls -lh app/build/outputs/apk/debug/*.apk app/build/outputs/apk/release/*.apk
 
       - name: Upload SwagDroid v1.0.0 Release APK (R8 Optimized & Signed)
         uses: actions/upload-artifact@v7
