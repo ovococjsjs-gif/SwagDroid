@@ -11,11 +11,17 @@ import com.swagdroid.core.vault.VaultMutationSpec
 import com.swagdroid.core.vault.VaultTransactionResult
 import com.swagdroid.feature.optimizer.data.UadCatalogRepository
 import com.swagdroid.feature.optimizer.engine.SystemTweaksController
+import com.swagdroid.feature.optimizer.model.AndroidGameModeChoice
+import com.swagdroid.feature.optimizer.model.ArtCompileMode
+import com.swagdroid.feature.optimizer.model.BoosterUserApp
 import com.swagdroid.feature.optimizer.model.DebloatAppItem
+import com.swagdroid.feature.optimizer.model.DebloatApplyMode
+import com.swagdroid.feature.optimizer.model.ImmersiveModeOption
 import com.swagdroid.feature.optimizer.model.LiveSystemTweaksState
 import com.swagdroid.feature.optimizer.model.OptimizerPresetTemplate
 import com.swagdroid.feature.optimizer.model.OptimizerSubTab
 import com.swagdroid.feature.optimizer.model.PrivateDnsPreset
+import com.swagdroid.feature.optimizer.model.RefreshRateProfile
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -31,15 +37,24 @@ data class OptimizerUiState(
     val activeTab: OptimizerSubTab = OptimizerSubTab.PRESETS,
     val presets: List<OptimizerPresetTemplate> = emptyList(),
     val tweaks: LiveSystemTweaksState = LiveSystemTweaksState(),
+    val boosterApps: List<BoosterUserApp> = emptyList(),
+    val selectedArtMode: ArtCompileMode = ArtCompileMode.SPEED_PROFILE,
     val allDebloatItems: List<DebloatAppItem> = emptyList(),
+    val debloatApplyMode: DebloatApplyMode = DebloatApplyMode.SUSPEND_SAFE,
     val showOnlyInstalledDebloat: Boolean = true,
     val selectedRemovalFilter: String? = "Recommended",
+    val selectedListSourceFilter: String? = null,
     val debloatQuery: String = "",
+    val exportedJsonPreview: String? = null,
+    val showJsonSheet: Boolean = false,
     val isBusy: Boolean = false,
     val bannerMessage: String? = null,
 ) {
     val installedBloatCount: Int
         get() = allDebloatItems.count { it.isInstalledOnDevice }
+
+    val frozenBloatCount: Int
+        get() = allDebloatItems.count { it.isInstalledOnDevice && it.stateTarget != PackageStateTarget.ENABLED }
 
     val selectedIds: Set<String>
         get() = allDebloatItems.asSequence().filter { it.isSelected }.map { it.entry.id }.toSet()
@@ -50,13 +65,14 @@ data class OptimizerUiState(
             return allDebloatItems.asSequence()
                 .filter { !showOnlyInstalledDebloat || it.isInstalledOnDevice }
                 .filter { selectedRemovalFilter == null || it.entry.removal == selectedRemovalFilter }
+                .filter { selectedListSourceFilter == null || it.entry.list == selectedListSourceFilter }
                 .filter {
                     q.isEmpty() ||
                         it.appLabel.lowercase().contains(q) ||
                         it.entry.id.lowercase().contains(q) ||
                         it.entry.desc.lowercase().contains(q)
                 }
-                .take(150)
+                .take(160)
                 .toList()
         }
 }
@@ -65,10 +81,16 @@ private data class InternalOptState(
     val activeTab: OptimizerSubTab = OptimizerSubTab.PRESETS,
     val presets: List<OptimizerPresetTemplate> = emptyList(),
     val tweaks: LiveSystemTweaksState = LiveSystemTweaksState(),
+    val boosterApps: List<BoosterUserApp> = emptyList(),
+    val selectedArtMode: ArtCompileMode = ArtCompileMode.SPEED_PROFILE,
     val allDebloatItems: List<DebloatAppItem> = emptyList(),
+    val debloatApplyMode: DebloatApplyMode = DebloatApplyMode.SUSPEND_SAFE,
     val showOnlyInstalledDebloat: Boolean = true,
     val selectedRemovalFilter: String? = "Recommended",
+    val selectedListSourceFilter: String? = null,
     val debloatQuery: String = "",
+    val exportedJsonPreview: String? = null,
+    val showJsonSheet: Boolean = false,
     val isBusy: Boolean = false,
     val bannerMessage: String? = null,
 )
@@ -94,10 +116,16 @@ class OptimizerViewModel @Inject constructor(
             activeTab = st.activeTab,
             presets = st.presets,
             tweaks = st.tweaks,
+            boosterApps = st.boosterApps,
+            selectedArtMode = st.selectedArtMode,
             allDebloatItems = st.allDebloatItems,
+            debloatApplyMode = st.debloatApplyMode,
             showOnlyInstalledDebloat = st.showOnlyInstalledDebloat,
             selectedRemovalFilter = st.selectedRemovalFilter,
+            selectedListSourceFilter = st.selectedListSourceFilter,
             debloatQuery = st.debloatQuery,
+            exportedJsonPreview = st.exportedJsonPreview,
+            showJsonSheet = st.showJsonSheet,
             isBusy = st.isBusy,
             bannerMessage = st.bannerMessage,
         )
@@ -124,17 +152,19 @@ class OptimizerViewModel @Inject constructor(
             internal.update { it.copy(isBusy = true) }
             val liveTweaks = controller.readLiveTweaksState()
             val debloat = uadRepo.scanInstalledAndCatalog()
+            val userApps = controller.loadUserAppsForBooster()
             internal.update {
                 it.copy(
                     tweaks = liveTweaks,
                     allDebloatItems = debloat,
+                    boosterApps = userApps,
                     isBusy = false,
                 )
             }
         }
     }
 
-    // --- Presets ---
+    // --- Presets & Portable JSON Profiles ---
 
     fun applyPreset(presetId: String) {
         val preset = internal.value.presets.firstOrNull { it.id == presetId } ?: return
@@ -150,7 +180,7 @@ class OptimizerViewModel @Inject constructor(
                             presets = cur.presets.map {
                                 if (it.id == presetId) it.copy(activeSnapshotId = res.snapshotId) else it
                             },
-                            bannerMessage = "Пресет «${preset.titleRu}» применён · точка отката #${res.snapshotId}",
+                            bannerMessage = "Пресет применён · создана точка отката #${res.snapshotId}",
                         )
                     }
                 }
@@ -174,7 +204,7 @@ class OptimizerViewModel @Inject constructor(
                             presets = cur.presets.map {
                                 if (it.id == presetId) it.copy(activeSnapshotId = null) else it
                             },
-                            bannerMessage = "Пресет полностью откачен к исходному состоянию (#$snapshotId)",
+                            bannerMessage = "Пресет полностью откачен (#$snapshotId)",
                         )
                     }
                 }
@@ -185,48 +215,73 @@ class OptimizerViewModel @Inject constructor(
         }
     }
 
-    // --- Tweaks ---
+    fun openPortableJsonSheet() {
+        val suspendedIds = internal.value.allDebloatItems
+            .filter { it.isInstalledOnDevice && it.stateTarget != PackageStateTarget.ENABLED }
+            .map { it.entry.id }
+        val json = controller.exportPortableProfileJson(internal.value.tweaks, suspendedIds)
+        internal.update { it.copy(exportedJsonPreview = json, showJsonSheet = true) }
+    }
 
-    fun setAnimationScale(scale: String) {
-        runVaultTweak("Шкала анимаций ${scale}x") {
-            controller.setAnimationScale(scale)
+    fun closePortableJsonSheet() {
+        internal.update { it.copy(showJsonSheet = false) }
+    }
+
+    fun importPortableJson(rawJson: String) {
+        viewModelScope.launch {
+            internal.update { it.copy(isBusy = true, showJsonSheet = false) }
+            when (val res = controller.importPortableProfileJson(rawJson)) {
+                is VaultTransactionResult.Success -> {
+                    val freshTweaks = controller.readLiveTweaksState()
+                    val freshDebloat = uadRepo.scanInstalledAndCatalog()
+                    internal.update {
+                        it.copy(
+                            isBusy = false,
+                            tweaks = freshTweaks,
+                            allDebloatItems = freshDebloat,
+                            bannerMessage = "JSON-профиль применён (${res.appliedCount} опер.) · точка отката #${res.snapshotId}",
+                        )
+                    }
+                }
+                is VaultTransactionResult.Failure -> {
+                    internal.update { it.copy(isBusy = false, bannerMessage = res.errorMessage) }
+                }
+            }
         }
     }
 
-    fun selectPrivateDns(preset: PrivateDnsPreset) {
-        runVaultTweak("DNS: ${preset.titleRu}") {
-            controller.applyPrivateDns(preset)
-        }
+    // --- System, Network & Privacy Tweaks ---
+
+    fun setAnimationScale(scale: String) = runVaultTweak("Шкала анимаций ${scale}x") {
+        controller.setAnimationScale(scale)
     }
 
-    fun toggleCachedAppsFreezer(enable: Boolean) {
-        runVaultTweak("Заморозка кэшированных процессов") {
-            controller.setSingleSwitch(
-                titleRu = if (enable) "Вкл. Cached Apps Freezer" else "Стандартный Cached Apps Freezer",
-                mutations = listOf(
-                    VaultMutationSpec.MutateSetting(
-                        SettingNamespace.GLOBAL,
-                        "cached_apps_freezer",
-                        if (enable) "enabled" else "device_default",
-                    ),
-                ),
-            )
-        }
+    fun applyRefreshProfile(profile: RefreshRateProfile) = runVaultTweak(profile.titleRu) {
+        controller.applyRefreshRateProfile(profile)
     }
 
-    fun togglePhantomKillerDisabled(disableKiller: Boolean) {
-        runVaultTweak("Phantom Process Killer") {
-            controller.setSingleSwitch(
-                titleRu = if (disableKiller) "Откл. Phantom Process Killer" else "Вкл. Phantom Process Killer",
-                mutations = listOf(
-                    VaultMutationSpec.MutateSetting(
-                        SettingNamespace.GLOBAL,
-                        "settings_enable_monitor_phantom_procs",
-                        if (disableKiller) "false" else "true",
-                    ),
-                ),
-            )
-        }
+    fun selectPrivateDns(preset: PrivateDnsPreset) = runVaultTweak("DNS: ${preset.titleRu}") {
+        controller.applyPrivateDns(preset)
+    }
+
+    fun applyCustomDnsHost(host: String) = runVaultTweak("Кастомный DoT DNS") {
+        controller.applyCustomPrivateDnsHost(host)
+    }
+
+    fun applyClipboardGuard() = runVaultTweak("Clipboard Guard") {
+        controller.applyClipboardGuardAllUserApps()
+    }
+
+    fun toggleSettingFlag(
+        labelRu: String,
+        namespace: SettingNamespace,
+        key: String,
+        targetVal: String,
+    ) = runVaultTweak(labelRu) {
+        controller.setSingleSwitch(
+            titleRu = labelRu,
+            mutations = listOf(VaultMutationSpec.MutateSetting(namespace, key, targetVal)),
+        )
     }
 
     fun toggleHiddenRadioScanDisabled(disableScan: Boolean) {
@@ -242,48 +297,61 @@ class OptimizerViewModel @Inject constructor(
         }
     }
 
-    fun toggleBatteryPercent(enable: Boolean) {
-        runVaultTweak("Процент батареи") {
-            controller.setSingleSwitch(
-                titleRu = "Процент батареи в строке состояния",
-                mutations = listOf(
-                    VaultMutationSpec.MutateSetting(
-                        SettingNamespace.SYSTEM,
-                        "status_bar_show_battery_percent",
-                        if (enable) "1" else "0",
-                    ),
-                ),
-            )
-        }
+    fun setKernelSwappiness(value: Int) = runVaultTweak("VM Swappiness $value") {
+        controller.setKernelSwappiness(value)
     }
 
-    fun toggleErrorTelemetryDisabled(disableTelemetry: Boolean) {
-        runVaultTweak("Отчёты об ошибках") {
-            controller.setSingleSwitch(
-                titleRu = "Фоновая отправка отчётов об ошибках",
-                mutations = listOf(
-                    VaultMutationSpec.MutateSetting(
-                        SettingNamespace.GLOBAL,
-                        "send_action_app_error",
-                        if (disableTelemetry) "0" else "1",
-                    ),
-                ),
-            )
-        }
+    // --- SystemUI Tuner ---
+
+    fun toggleStatusBarIcon(token: String, hide: Boolean) = runVaultTweak("Иконка статус-бара: $token") {
+        controller.toggleStatusBarIconHidden(token, hide)
     }
 
-    fun runArtBooster() {
+    fun resetStatusBarIcons() = runVaultTweak("Все иконки статус-бара") {
+        controller.resetAllStatusBarIcons()
+    }
+
+    fun applyImmersiveMode(option: ImmersiveModeOption) = runVaultTweak(option.titleRu) {
+        controller.applyImmersiveMode(option)
+    }
+
+    // --- App Booster & Game Mode ---
+
+    fun selectArtCompileMode(mode: ArtCompileMode) {
+        internal.update { it.copy(selectedArtMode = mode) }
+    }
+
+    fun runGlobalArtBooster() {
+        val mode = internal.value.selectedArtMode
         viewModelScope.launch {
             internal.update { it.copy(isBusy = true) }
-            val summary = controller.runArtBoosterAndTrim()
+            val summary = controller.runGlobalArtCompileAndTrim(mode)
             internal.update { it.copy(isBusy = false, bannerMessage = summary) }
         }
     }
 
-    // --- Debloater ---
+    fun compileSingleApp(pkg: String) {
+        val mode = internal.value.selectedArtMode
+        viewModelScope.launch {
+            internal.update { it.copy(isBusy = true) }
+            val msg = controller.compileSingleApp(pkg, mode)
+            internal.update { it.copy(isBusy = false, bannerMessage = msg) }
+        }
+    }
+
+    fun setAppGameMode(pkg: String, choice: AndroidGameModeChoice) =
+        runVaultTweak("Game Mode ($pkg → ${choice.labelRu})") {
+            controller.applyAndroidGameMode(pkg, choice)
+        }
+
+    // --- Debloater Pro ---
 
     fun updateDebloatQuery(query: String) {
         internal.update { it.copy(debloatQuery = query) }
+    }
+
+    fun selectDebloatApplyMode(mode: DebloatApplyMode) {
+        internal.update { it.copy(debloatApplyMode = mode) }
     }
 
     fun toggleInstalledOnlyFilter(onlyInstalled: Boolean) {
@@ -292,6 +360,10 @@ class OptimizerViewModel @Inject constructor(
 
     fun selectRemovalFilter(removal: String?) {
         internal.update { it.copy(selectedRemovalFilter = removal) }
+    }
+
+    fun selectListSourceFilter(source: String?) {
+        internal.update { it.copy(selectedListSourceFilter = source) }
     }
 
     fun togglePackageSelection(pkgId: String) {
@@ -304,8 +376,32 @@ class OptimizerViewModel @Inject constructor(
         }
     }
 
+    fun selectAllRecommendedOnDevice() {
+        internal.update { cur ->
+            cur.copy(
+                allDebloatItems = cur.allDebloatItems.map { item ->
+                    if (item.isInstalledOnDevice && item.entry.removal == "Recommended" && item.stateTarget == PackageStateTarget.ENABLED) {
+                        item.copy(isSelected = true)
+                    } else {
+                        item
+                    }
+                },
+            )
+        }
+    }
+
+    fun clearAllDebloatSelections() {
+        internal.update { cur ->
+            cur.copy(allDebloatItems = cur.allDebloatItems.map { it.copy(isSelected = false) })
+        }
+    }
+
     fun freezeSinglePackage(pkgId: String) {
-        mutatePackages(listOf(pkgId), PackageStateTarget.SUSPENDED, "Мягкая заморозка")
+        val target = when (internal.value.debloatApplyMode) {
+            DebloatApplyMode.SUSPEND_SAFE -> PackageStateTarget.SUSPENDED
+            DebloatApplyMode.DISABLE_USER -> PackageStateTarget.DISABLED_USER
+        }
+        mutatePackages(listOf(pkgId), target, internal.value.debloatApplyMode.titleRu)
     }
 
     fun restoreSinglePackage(pkgId: String) {
@@ -316,7 +412,18 @@ class OptimizerViewModel @Inject constructor(
         val selected = internal.value.allDebloatItems
             .filter { it.isSelected && it.isInstalledOnDevice }
             .map { it.entry.id }
-        mutatePackages(selected, PackageStateTarget.SUSPENDED, "Пакетная заморозка блоатвари")
+        val target = when (internal.value.debloatApplyMode) {
+            DebloatApplyMode.SUSPEND_SAFE -> PackageStateTarget.SUSPENDED
+            DebloatApplyMode.DISABLE_USER -> PackageStateTarget.DISABLED_USER
+        }
+        mutatePackages(selected, target, "Пакетная заморозка блоатвари")
+    }
+
+    fun restoreAllFrozenPackages() {
+        val frozen = internal.value.allDebloatItems
+            .filter { it.isInstalledOnDevice && it.stateTarget != PackageStateTarget.ENABLED }
+            .map { it.entry.id }
+        mutatePackages(frozen, PackageStateTarget.ENABLED, "Массовая разморозка всех пакетов")
     }
 
     private fun mutatePackages(

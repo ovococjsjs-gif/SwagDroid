@@ -30,6 +30,7 @@ import com.swagdroid.core.designsystem.component.SwagSectionCard
 import com.swagdroid.core.designsystem.icon.SwagIcons
 import com.swagdroid.core.model.RiskLevel
 import com.swagdroid.core.model.SwagTab
+import com.swagdroid.feature.cleaner.CleanerRoute
 import com.swagdroid.feature.dashboard.DashboardRoute
 import com.swagdroid.feature.fixer.FixerRoute
 import com.swagdroid.feature.optimizer.OptimizerRoute
@@ -80,20 +81,7 @@ fun SwagAppShell() {
                 OptimizerRoute(contentPadding = innerPadding)
             }
             SwagTab.CLEANER -> {
-                ModuleBlueprintScreen(
-                    title = "Умная очистка системы (Этап 3)",
-                    subtitle = "Честная зачистка без фейковых «ускорителей ОЗУ»",
-                    icon = SwagIcons.Cleaner,
-                    plannedFeatures = listOf(
-                        "Сейф мессенджеров (Telegram, WhatsApp, TikTok, VK): кружочки, видео, стикеры" to RiskLevel.SAFE,
-                        "CorpseFinder: поиск сиротских папок давно удалённых игр и программ" to RiskLevel.SAFE,
-                        "Очистка всех кэшей одной командой через ADB / Shizuku / Root" to RiskLevel.SAFE,
-                        "Удаление зависших сессий установщика APK (staging-sessions) и логов" to RiskLevel.SAFE,
-                        "Поиск дубликатов и серий похожих снимков (SHA-256 + pHash)" to RiskLevel.SAFE,
-                    ),
-                    onBackToDashboard = { currentTab = SwagTab.DASHBOARD },
-                    modifier = Modifier.padding(innerPadding),
-                )
+                CleanerRoute(contentPadding = innerPadding)
             }
             SwagTab.SECURITY -> {
                 ModuleBlueprintScreen(
