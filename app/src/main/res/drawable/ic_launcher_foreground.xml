@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Emerald Shield -->
+    <path
+        android:fillColor="#14B8A6"
+        android:pathData="M54,24 L78,33 L78,52 C78,68 67.5,80.2 54,85 C40.5,80.2 30,68 30,52 L30,33 Z" />
+    <!-- Inner Dark Core -->
+    <path
+        android:fillColor="#0B131C"
+        android:pathData="M54,30 L72,37 L72,52 C72,64.2 64.1,74 54,78.2 C43.9,74 36,64.2 36,52 L36,37 Z" />
+    <!-- Pulse / Lightning Line -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M40,54 L47,54 L51,43 L57,64 L61,51 L68,54"
+        android:strokeColor="#5EEAD4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="3.6" />
+</vector>

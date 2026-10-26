@@ -1,0 +1,23 @@
+# Gradle & Android Studio
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build/
+**/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Keystores
+*.jks
+*.keystore
+
+# Scratch / test artifacts
+pelican_bicycle.png
+pelican_bicycle.svg
