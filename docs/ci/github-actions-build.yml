@@ -1,38 +1,51 @@
-name: SwagDroid Android CI
+name: SwagDroid v1.0.0 Full Build & Tests
 
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
+      - "arena/**"
     tags:
       - "v*"
+  pull_request:
 
 jobs:
-  build-and-test:
-    name: Assemble APK & Run Unit Tests
+  build-and-verify:
+    name: Unit Tests + Debug & R8 Release APK
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 21
+      - name: Set up JDK 21 (Temurin)
         uses: actions/setup-java@v4
         with:
           java-version: "21"
           distribution: "temurin"
           cache: "gradle"
 
+      - name: Setup Android SDK 37
+        uses: android-actions/setup-android@v3
+
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Run local unit tests
+      - name: Run all JUnit4 module tests across all 11 modules
         run: ./gradlew testDebugUnitTest --stacktrace
 
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace
+      - name: Assemble Debug & R8-Optimized Release APKs
+        run: ./gradlew assembleDebug assembleRelease --stacktrace
 
-      - name: Upload SwagDroid Debug APK
+      - name: Upload SwagDroid v1.0.0 Release APK (R8 Optimized & Signed)
         uses: actions/upload-artifact@v4
         with:
-          name: SwagDroid-debug-apk
+          name: SwagDroid-v1.0.0-release-apk
+          path: app/build/outputs/apk/release/*.apk
+
+      - name: Upload SwagDroid v1.0.0 Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SwagDroid-v1.0.0-debug-apk
           path: app/build/outputs/apk/debug/*.apk

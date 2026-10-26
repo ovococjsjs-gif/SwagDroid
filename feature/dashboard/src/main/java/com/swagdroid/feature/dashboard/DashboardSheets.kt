@@ -307,6 +307,7 @@ fun StateVaultHistorySheet(
     snapshots: List<VaultSnapshot>,
     onDismiss: () -> Unit,
     onCreateBaseline: () -> Unit,
+    onExportJson: () -> Unit,
     onRollbackSingle: (Long) -> Unit,
     onRollbackAll: () -> Unit,
 ) {
@@ -336,14 +337,21 @@ fun StateVaultHistorySheet(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 OutlinedButton(
                     onClick = onCreateBaseline,
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
                 ) {
-                    Text("Создать слепок")
+                    Text("Слепок")
+                }
+                OutlinedButton(
+                    onClick = onExportJson,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text("Экспорт JSON")
                 }
                 if (snapshots.any { it.status == SnapshotStatus.ACTIVE }) {
                     Button(
@@ -352,7 +360,7 @@ fun StateVaultHistorySheet(
                         colors = ButtonDefaults.buttonColors(containerColor = StatusDanger),
                         shape = RoundedCornerShape(12.dp),
                     ) {
-                        Text("Откатить все")
+                        Text("Сброс всех")
                     }
                 }
             }

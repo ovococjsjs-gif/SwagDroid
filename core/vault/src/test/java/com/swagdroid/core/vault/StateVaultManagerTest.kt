@@ -167,4 +167,24 @@ class StateVaultManagerTest {
         // Step 1 must be restored back to 1.0!
         assertEquals("1.0", exec.settingsMap["global:animator_duration_scale"])
     }
+
+    @Test
+    fun `SystemBrickGuard blocks disabling critical Android and privilege packages`() = runTest {
+        val store = FakeVaultStore()
+        val exec = FakeCommandExecutor()
+        val manager = StateVaultManager(store, exec, json)
+
+        for (criticalPkg in listOf("com.android.systemui", "com.android.settings", "moe.shizuku.privileged.api", "com.swagdroid")) {
+            val res = manager.applyTransaction(
+                title = "Опасная попытка заморозки $criticalPkg",
+                reason = "Проверка защиты от бутлупа",
+                source = FeatureSource.OPTIMIZER,
+                mutations = listOf(
+                    VaultMutationSpec.MutatePackageState(criticalPkg, PackageStateTarget.DISABLED_USER),
+                ),
+            )
+            assertTrue("Expected failure for $criticalPkg", res is VaultTransactionResult.Failure)
+            assertNull(exec.packageStates[criticalPkg])
+        }
+    }
 }

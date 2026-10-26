@@ -2,8 +2,14 @@ package com.swagdroid.feature.security
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.swagdroid.core.model.FeatureSource
+import com.swagdroid.core.model.PackageStateTarget
 import com.swagdroid.core.model.PrivilegeState
+import com.swagdroid.core.model.SnapshotStatus
+import com.swagdroid.core.model.VaultOperation
+import com.swagdroid.core.model.VaultSnapshot
 import com.swagdroid.core.privilege.PrivilegeManager
+import com.swagdroid.core.vault.StateVaultManager
 import com.swagdroid.core.vault.VaultTransactionResult
 import com.swagdroid.feature.adblock.AdblockController
 import com.swagdroid.feature.adblock.data.BlocklistRepository
@@ -21,6 +27,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -38,7 +45,6 @@ data class SecurityCenterUiState(
     val isScanning: Boolean = false,
     val scanStep: Int = 0,
     val scanTotal: Int = 0,
-    // AdBlock 3-in-1 state
     val selectedAdblockMode: AdblockEngineMode = AdblockEngineMode.LOCAL_DNS_VPN,
     val selectedResolver: UpstreamDnsResolver = UpstreamDnsResolver.ADGUARD,
     val isLocalVpnRunning: Boolean = false,
@@ -55,7 +61,6 @@ data class SecurityCenterUiState(
 private data class InternalSecState(
     val activeTab: SecuritySubTab = SecuritySubTab.THREAT_SCANNER,
     val threats: List<AggregatedThreatDecision> = emptyList(),
-    val quarantinedItems: List<QuarantineEntry> = emptyList(),
     val trackerReports: List<AppTrackerScanItem> = emptyList(),
     val hasScannedThreatsOnce: Boolean = false,
     val hasScannedTrackersOnce: Boolean = false,
@@ -73,6 +78,7 @@ private data class InternalSecState(
 @HiltViewModel
 class SecurityCenterViewModel @Inject constructor(
     privilegeManager: PrivilegeManager,
+    vaultManager: StateVaultManager,
     private val pipeline: SecurityPipelineEngine,
     private val adblockController: AdblockController,
     private val blocklistRepo: BlocklistRepository,
@@ -80,18 +86,34 @@ class SecurityCenterViewModel @Inject constructor(
 
     private val internal = MutableStateFlow(InternalSecState())
 
+    /**
+     * Rehydrates active Quarantine items directly from Room-backed StateVault snapshots so
+     * isolated packages survive app restarts and phone reboots with zero state loss!
+     */
+    private val persistedQuarantineFlow = vaultManager.snapshotsFlow.map { snapshots ->
+        snapshots.mapNotNull(::snapshotToQuarantineEntry)
+    }
+
+    private val adblockExtrasFlow = combine(
+        SwagDnsVpnService.isRunningFlow,
+        blocklistRepo.recentLog,
+        blocklistRepo.customBlocked,
+        blocklistRepo.customAllowed,
+    ) { vpnRunning, dnsLog, customBlk, customAlw ->
+        AdblockDynamicSlice(vpnRunning, dnsLog, customBlk, customAlw)
+    }
+
     val uiState: StateFlow<SecurityCenterUiState> = combine(
         privilegeManager.state,
         internal,
-        SwagDnsVpnService.isRunningFlow,
-        blocklistRepo.recentLog,
-        combine(blocklistRepo.customBlocked, blocklistRepo.customAllowed) { b, a -> b to a },
-    ) { priv, st, vpnRunning, dnsLog, (customBlk, customAlw) ->
+        persistedQuarantineFlow,
+        adblockExtrasFlow,
+    ) { priv, st, quarantined, adSlice ->
         SecurityCenterUiState(
             privilegeState = priv,
             activeTab = st.activeTab,
             threats = st.threats,
-            quarantinedItems = st.quarantinedItems,
+            quarantinedItems = quarantined,
             trackerReports = st.trackerReports,
             hasScannedThreatsOnce = st.hasScannedThreatsOnce,
             hasScannedTrackersOnce = st.hasScannedTrackersOnce,
@@ -100,14 +122,14 @@ class SecurityCenterViewModel @Inject constructor(
             scanTotal = st.scanTotal,
             selectedAdblockMode = st.selectedAdblockMode,
             selectedResolver = st.selectedResolver,
-            isLocalVpnRunning = vpnRunning,
+            isLocalVpnRunning = adSlice.vpnRunning,
             isPrivateDnsActive = st.isPrivateDnsActive,
             activePrivateDnsHost = st.activePrivateDnsHost,
             isRootHostsActive = st.isRootHostsActive,
             totalBlockRulesCount = blocklistRepo.totalRulesCount,
-            customBlockedDomains = customBlk,
-            customAllowedDomains = customAlw,
-            recentDnsLog = dnsLog,
+            customBlockedDomains = adSlice.customBlk,
+            customAllowedDomains = adSlice.customAlw,
+            recentDnsLog = adSlice.dnsLog,
             bannerMessage = st.bannerMessage,
         )
     }.stateIn(
@@ -130,10 +152,6 @@ class SecurityCenterViewModel @Inject constructor(
     fun dismissBanner() {
         internal.update { it.copy(bannerMessage = null) }
     }
-
-    // =========================================================================
-    // Threat Scanner & Quarantine
-    // =========================================================================
 
     fun runThreatScan() {
         if (internal.value.isScanning) return
@@ -170,7 +188,6 @@ class SecurityCenterViewModel @Inject constructor(
                     internal.update { cur ->
                         cur.copy(
                             threats = cur.threats.filterNot { it.targetKey == decision.targetKey },
-                            quarantinedItems = listOf(entry) + cur.quarantinedItems,
                             bannerMessage = "Пакет «${entry.appLabel}» остановлен, лишён оверлеев и помещён в Карантин (#${entry.vaultSnapshotId})",
                         )
                     }
@@ -219,7 +236,6 @@ class SecurityCenterViewModel @Inject constructor(
             if (ok) {
                 internal.update { cur ->
                     cur.copy(
-                        quarantinedItems = cur.quarantinedItems.filterNot { it.vaultSnapshotId == entry.vaultSnapshotId },
                         bannerMessage = "Пакет «${entry.appLabel}» восстановлен из карантина",
                     )
                 }
@@ -228,10 +244,6 @@ class SecurityCenterViewModel @Inject constructor(
     }
 
     fun buildUninstallIntent(packageName: String) = pipeline.buildSystemUninstallIntent(packageName)
-
-    // =========================================================================
-    // Exodus Tracker Radar
-    // =========================================================================
 
     fun runTrackerRadarScan() {
         if (internal.value.isScanning) return
@@ -264,10 +276,6 @@ class SecurityCenterViewModel @Inject constructor(
         }
     }
 
-    // =========================================================================
-    // Adaptive 3-Mode AdBlock & Firewall
-    // =========================================================================
-
     fun selectAdblockMode(mode: AdblockEngineMode) {
         internal.update { it.copy(selectedAdblockMode = mode) }
     }
@@ -278,7 +286,7 @@ class SecurityCenterViewModel @Inject constructor(
 
     fun onLocalVpnPermissionGranted() {
         adblockController.startLocalDnsVpn(internal.value.selectedResolver)
-        internal.update { it.copy(bannerMessage = "Локальный DNS-щит запущен (фильтруются только UDP:53 запросы)") }
+        internal.update { it.copy(bannerMessage = "Локальный DNS-щит запущен (фильтруются IPv4 + IPv6 UDP:53 запросы)") }
     }
 
     fun stopLocalDnsVpn() {
@@ -331,7 +339,7 @@ class SecurityCenterViewModel @Inject constructor(
         internal.update {
             it.copy(
                 bannerMessage = if (ok) {
-                    "Домен добавлен в ${if (block) "чёрный" else "белый"} список"
+                    "Домен сохранён в ${if (block) "чёрный" else "белый"} список"
                 } else {
                     "Введите корректное доменное имя (например, ads.example.com)"
                 },
@@ -350,6 +358,32 @@ class SecurityCenterViewModel @Inject constructor(
                 isPrivateDnsActive = dotActive,
                 activePrivateDnsHost = dotHost,
                 isRootHostsActive = rootHosts,
+            )
+        }
+    }
+
+    private data class AdblockDynamicSlice(
+        val vpnRunning: Boolean,
+        val dnsLog: List<DnsQueryLogEntry>,
+        val customBlk: Set<String>,
+        val customAlw: Set<String>,
+    )
+
+    companion object {
+        internal fun snapshotToQuarantineEntry(snapshot: VaultSnapshot): QuarantineEntry? {
+            if (snapshot.source != FeatureSource.SECURITY || snapshot.status != SnapshotStatus.ACTIVE) {
+                return null
+            }
+            val pkgOp = snapshot.operations.filterIsInstance<VaultOperation.PackageStateChange>()
+                .firstOrNull { it.newState == PackageStateTarget.SUSPENDED }
+                ?: return null
+            val cleanTitle = snapshot.title.removePrefix("Карантин угрозы:").trim().ifEmpty { pkgOp.packageName }
+            return QuarantineEntry(
+                packageName = pkgOp.packageName,
+                appLabel = cleanTitle,
+                quarantinedAtEpochMs = snapshot.createdAtEpochMs,
+                reasonSummaryRu = snapshot.reason,
+                vaultSnapshotId = snapshot.id,
             )
         }
     }

@@ -605,7 +605,15 @@ class CleanerScanAndPurgeEngine @Inject constructor(
         shield: CredentialShieldConfig,
         activeAutofillPkg: String?,
     ): Pair<Int, Long> {
-        if (!AuthAndCredentialsGuard.isPathSafeToClean(file.absolutePath, shield, null, activeAutofillPkg)) {
+        val isSymlink = runCatching { java.nio.file.Files.isSymbolicLink(file.toPath()) }.getOrDefault(false)
+        if (isSymlink) {
+            // Never traverse symbolic links during deletion (blocks TOCTOU symlink escape attacks)
+            return 0 to 0L
+        }
+        val canonical = runCatching { file.canonicalPath }.getOrNull() ?: return 0 to 0L
+        if (!AuthAndCredentialsGuard.isPathSafeToClean(file.absolutePath, shield, null, activeAutofillPkg) ||
+            !AuthAndCredentialsGuard.isPathSafeToClean(canonical, shield, null, activeAutofillPkg)
+        ) {
             return 0 to 0L
         }
         if (file.isDirectory) {

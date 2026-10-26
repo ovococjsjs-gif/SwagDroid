@@ -24,6 +24,7 @@ import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
 import rikka.sui.Sui
 import java.io.File
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -49,13 +50,22 @@ class PrivilegeManager @Inject constructor(
     private val _state = MutableStateFlow(
         PrivilegeState(
             isWirelessAdbSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R,
-        )
+        ),
     )
     val state: StateFlow<PrivilegeState> = _state.asStateFlow()
 
     private val isSuiInitialized: Boolean = runCatching {
         Sui.init(context.packageName)
     }.getOrDefault(false)
+
+    private val pendingPermissionCallback = AtomicReference<((Boolean) -> Unit)?>(null)
+
+    private val permissionResultListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+        if (requestCode != SHIZUKU_REQUEST_CODE) return@OnRequestPermissionResultListener
+        val granted = grantResult == PackageManager.PERMISSION_GRANTED
+        scope.launch { refreshPrivilegeState(requestRootPopup = false) }
+        pendingPermissionCallback.getAndSet(null)?.invoke(granted)
+    }
 
     private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
         scope.launch { refreshPrivilegeState(requestRootPopup = false) }
@@ -69,6 +79,7 @@ class PrivilegeManager @Inject constructor(
         runCatching {
             Shizuku.addBinderReceivedListenerSticky(binderReceivedListener)
             Shizuku.addBinderDeadListener(binderDeadListener)
+            Shizuku.addRequestPermissionResultListener(permissionResultListener)
         }
         scope.launch {
             refreshPrivilegeState(requestRootPopup = false)
@@ -88,8 +99,6 @@ class PrivilegeManager @Inject constructor(
 
         val (shizukuStatus, shizukuUid) = inspectShizukuStatus()
 
-        // Detect Root either via explicitly requested popup, already-granted libsu shell,
-        // or Sui running as UID 0.
         var rootProvider = RootProvider.NONE
         var rootVersion: String? = null
 
@@ -140,7 +149,7 @@ class PrivilegeManager @Inject constructor(
     }
 
     /**
-     * Requests Shizuku / Sui runtime authorization on the main thread.
+     * Requests Shizuku / Sui runtime authorization safely without leaking duplicate listeners.
      */
     fun requestShizukuPermission(onResult: (Boolean) -> Unit = {}) {
         runCatching {
@@ -153,18 +162,10 @@ class PrivilegeManager @Inject constructor(
                 onResult(true)
                 return
             }
-            val listener = object : Shizuku.OnRequestPermissionResultListener {
-                override fun onRequestPermissionResult(requestCode: Int, grantResult: Int) {
-                    if (requestCode != SHIZUKU_REQUEST_CODE) return
-                    Shizuku.removeRequestPermissionResultListener(this)
-                    val granted = grantResult == PackageManager.PERMISSION_GRANTED
-                    scope.launch { refreshPrivilegeState(requestRootPopup = false) }
-                    onResult(granted)
-                }
-            }
-            Shizuku.addRequestPermissionResultListener(listener)
+            pendingPermissionCallback.set(onResult)
             Shizuku.requestPermission(SHIZUKU_REQUEST_CODE)
         }.onFailure {
+            pendingPermissionCallback.set(null)
             onResult(false)
         }
     }
@@ -202,7 +203,8 @@ class PrivilegeManager @Inject constructor(
     private fun inspectShizukuStatus(): Pair<ShizukuStatus, Int?> {
         val binderAlive = runCatching { Shizuku.pingBinder() && !Shizuku.isPreV11() }.getOrDefault(false)
         if (binderAlive) {
-            val granted = isSuiInitialized || runCatching {
+            // Always verify runtime permission explicitly (even when Sui binder is initialized!)
+            val granted = runCatching {
                 Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
             }.getOrDefault(false)
 

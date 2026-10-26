@@ -9,6 +9,8 @@ import com.swagdroid.core.model.VaultOperation
 import com.swagdroid.core.model.VaultSnapshot
 import com.swagdroid.core.privilege.PrivilegedCommandExecutor
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
@@ -50,20 +52,35 @@ class StateVaultManager @Inject constructor(
     private val executor: PrivilegedCommandExecutor,
     private val json: Json,
 ) {
+    private val txMutex = Mutex()
+
     val snapshotsFlow: Flow<List<VaultSnapshot>> = store.observeSnapshots()
 
     /**
-     * Captures the exact live before-state, persists a restore point in Room BEFORE touching
-     * the system, executes all mutations, and unwinds in LIFO order if any step fails.
+     * Serialized, brick-guarded transaction engine:
+     * 0. Validates every package mutation through [SystemBrickGuard].
+     * 1. Captures the exact live before-state under [txMutex].
+     * 2. Persists a restore point in Room BEFORE mutating the OS.
+     * 3. Executes all mutations and unwinds in LIFO order if any step fails.
      */
     suspend fun applyTransaction(
         title: String,
         reason: String,
         source: FeatureSource,
         mutations: List<VaultMutationSpec>,
-    ): VaultTransactionResult {
+    ): VaultTransactionResult = txMutex.withLock {
         if (mutations.isEmpty()) {
-            return VaultTransactionResult.Failure("Список операций пуст", autoReverted = true)
+            return@withLock VaultTransactionResult.Failure("Список операций пуст", autoReverted = true)
+        }
+
+        // Phase 0: Mandatory SystemBrickGuard pre-flight validation
+        for (spec in mutations) {
+            if (spec is VaultMutationSpec.MutatePackageState) {
+                val violation = SystemBrickGuard.validatePackageMutation(spec.packageName, spec.targetState)
+                if (violation != null) {
+                    return@withLock VaultTransactionResult.Failure(violation, autoReverted = true)
+                }
+            }
         }
 
         // Phase 1: Capture exact current state before mutating anything
@@ -137,7 +154,7 @@ class StateVaultManager @Inject constructor(
                     rolledBackAtEpochMs = System.currentTimeMillis(),
                 )
                 val errText = res.stderrText.ifEmpty { "Код возврата ${res.exitCode} (проверьте уровень прав ADB/Root)" }
-                return VaultTransactionResult.Failure(
+                return@withLock VaultTransactionResult.Failure(
                     errorMessage = errText,
                     autoReverted = allReverted,
                 )
@@ -145,7 +162,7 @@ class StateVaultManager @Inject constructor(
             appliedSoFar.add(op)
         }
 
-        return VaultTransactionResult.Success(
+        VaultTransactionResult.Success(
             snapshotId = snapshotId,
             appliedCount = appliedSoFar.size,
         )
@@ -155,7 +172,7 @@ class StateVaultManager @Inject constructor(
      * Captures a read-only baseline checkpoint of key system parameters so the user can always
      * restore their original baseline settings in 1 tap.
      */
-    suspend fun createBaselineCheckpoint(): Long {
+    suspend fun createBaselineCheckpoint(): Long = txMutex.withLock {
         val baselineKeys = listOf(
             SettingNamespace.GLOBAL to "window_animation_scale",
             SettingNamespace.GLOBAL to "transition_animation_scale",
@@ -165,6 +182,7 @@ class StateVaultManager @Inject constructor(
             SettingNamespace.GLOBAL to "captive_portal_https_url",
             SettingNamespace.GLOBAL to "wifi_scan_always_enabled",
             SettingNamespace.GLOBAL to "ble_scan_always_enabled",
+            SettingNamespace.SECURE to "icon_blacklist",
         )
 
         val capturedOps = baselineKeys.map { (ns, key) ->
@@ -187,13 +205,46 @@ class StateVaultManager @Inject constructor(
             status = SnapshotStatus.ACTIVE,
             operations = capturedOps,
         )
-        return store.saveSnapshot(snapshot)
+        store.saveSnapshot(snapshot)
     }
 
     /**
      * Rolls back a single snapshot in reverse (LIFO) operation order.
      */
-    suspend fun rollbackSnapshot(snapshotId: Long): VaultTransactionResult {
+    suspend fun rollbackSnapshot(snapshotId: Long): VaultTransactionResult = txMutex.withLock {
+        rollbackSnapshotLocked(snapshotId)
+    }
+
+    /**
+     * Emergency Safe Reset: rolls back ALL active snapshots newest-first (true LIFO).
+     */
+    suspend fun rollbackAllActive(): Int = txMutex.withLock {
+        val activeList = store.getActiveSnapshotsNewestFirst()
+        var rolledBackCount = 0
+        for (snapshot in activeList) {
+            val res = rollbackSnapshotLocked(snapshot.id)
+            if (res is VaultTransactionResult.Success) {
+                rolledBackCount++
+            }
+        }
+        rolledBackCount
+    }
+
+    suspend fun deleteSnapshotRecord(snapshotId: Long) = txMutex.withLock {
+        store.deleteSnapshot(snapshotId)
+    }
+
+    suspend fun exportSnapshotsJson(deviceModel: String): String = txMutex.withLock {
+        val active = store.getActiveSnapshotsNewestFirst()
+        val bundle = VaultExportBundle(
+            exportedAtEpochMs = System.currentTimeMillis(),
+            deviceModel = deviceModel,
+            snapshots = active,
+        )
+        json.encodeToString(bundle)
+    }
+
+    private suspend fun rollbackSnapshotLocked(snapshotId: Long): VaultTransactionResult {
         val snapshot = store.getSnapshotById(snapshotId)
             ?: return VaultTransactionResult.Failure("Точка восстановления #$snapshotId не найдена", false)
 
@@ -227,35 +278,6 @@ class StateVaultManager @Inject constructor(
                 autoReverted = false,
             )
         }
-    }
-
-    /**
-     * Emergency Safe Reset: rolls back ALL active snapshots newest-first (true LIFO).
-     */
-    suspend fun rollbackAllActive(): Int {
-        val activeList = store.getActiveSnapshotsNewestFirst()
-        var rolledBackCount = 0
-        for (snapshot in activeList) {
-            val res = rollbackSnapshot(snapshot.id)
-            if (res is VaultTransactionResult.Success) {
-                rolledBackCount++
-            }
-        }
-        return rolledBackCount
-    }
-
-    suspend fun deleteSnapshotRecord(snapshotId: Long) {
-        store.deleteSnapshot(snapshotId)
-    }
-
-    suspend fun exportSnapshotsJson(deviceModel: String): String {
-        val active = store.getActiveSnapshotsNewestFirst()
-        val bundle = VaultExportBundle(
-            exportedAtEpochMs = System.currentTimeMillis(),
-            deviceModel = deviceModel,
-            snapshots = active,
-        )
-        return json.encodeToString(bundle)
     }
 
     private suspend fun executeForwardOperation(op: VaultOperation) = when (op) {

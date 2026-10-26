@@ -1,6 +1,8 @@
 package com.swagdroid.feature.dashboard
 
+import android.content.Intent
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,14 +29,17 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.swagdroid.core.designsystem.R as DesignR
 import com.swagdroid.core.designsystem.component.HealthScoreGauge
 import com.swagdroid.core.designsystem.component.PrivilegeTierBadge
 import com.swagdroid.core.designsystem.component.RiskBadge
@@ -56,11 +61,18 @@ import com.swagdroid.core.model.SwagTab
 @Composable
 fun DashboardRoute(
     onNavigateToTab: (SwagTab) -> Unit,
+    openVaultTrigger: Int = 0,
     modifier: Modifier = Modifier,
     viewModel: DashboardViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    LaunchedEffect(openVaultTrigger) {
+        if (openVaultTrigger > 0) {
+            viewModel.openSheet(DashboardSheet.StateVaultHistory)
+        }
+    }
 
     DashboardScreen(
         uiState = uiState,
@@ -107,6 +119,18 @@ fun DashboardRoute(
                 snapshots = uiState.snapshots,
                 onDismiss = viewModel::closeSheet,
                 onCreateBaseline = viewModel::createBaselineCheckpoint,
+                onExportJson = {
+                    viewModel.exportVaultJson { exportedJson ->
+                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "application/json"
+                            putExtra(Intent.EXTRA_SUBJECT, "SwagDroid StateVault Backup")
+                            putExtra(Intent.EXTRA_TEXT, exportedJson)
+                        }
+                        runCatching {
+                            context.startActivity(Intent.createChooser(shareIntent, "Экспорт точек отката StateVault"))
+                        }
+                    }
+                },
                 onRollbackSingle = viewModel::rollbackSnapshot,
                 onRollbackAll = viewModel::rollbackAllActive,
             )
@@ -132,16 +156,22 @@ fun DashboardScreen(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        // 1. Header Row
+        // 1. Header Row with Official SwagDroid Emblem
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                Image(
+                    painter = painterResource(DesignR.drawable.swag_brand_logo),
+                    contentDescription = "SwagDroid Emblem",
+                    modifier = Modifier.size(46.dp),
+                )
+                Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "SwagDroid",
-                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.ExtraBold),
+                        text = "SwagDroid · v1.0",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold),
                         color = MaterialTheme.colorScheme.onBackground,
                     )
                     Text(

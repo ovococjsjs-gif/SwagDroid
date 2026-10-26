@@ -6,6 +6,7 @@ import android.os.Build
 import com.swagdroid.core.model.FeatureSource
 import com.swagdroid.core.model.PrivilegeTier
 import com.swagdroid.core.model.SettingNamespace
+import com.swagdroid.core.privilege.DumpsysAndKernelParsers
 import com.swagdroid.core.privilege.PrivilegedCommandExecutor
 import com.swagdroid.core.vault.StateVaultManager
 import com.swagdroid.core.vault.VaultMutationSpec
@@ -121,7 +122,11 @@ class AdblockController @Inject constructor(
             "/system/etc/hosts"
         }
 
-        executor.execute("cp /system/etc/hosts '${backupFile.absolutePath}' 2>/dev/null || true")
+        val qStaging = DumpsysAndKernelParsers.shellQuote(stagingFile.absolutePath)
+        val qBackup = DumpsysAndKernelParsers.shellQuote(backupFile.absolutePath)
+        val qTarget = DumpsysAndKernelParsers.shellQuote(targetPath)
+
+        executor.execute("cp /system/etc/hosts $qBackup 2>/dev/null || true")
 
         vaultManager.applyTransaction(
             title = "Systemless AdBlock /etc/hosts (${blocklistRepo.totalRulesCount} прав.)",
@@ -129,8 +134,8 @@ class AdblockController @Inject constructor(
             source = FeatureSource.ADBLOCK,
             mutations = listOf(
                 VaultMutationSpec.MutateCustomShell(
-                    applyCommand = "cp '${stagingFile.absolutePath}' '$targetPath' && chmod 644 '$targetPath'",
-                    revertCommand = "if [ -f '${backupFile.absolutePath}' ]; then cp '${backupFile.absolutePath}' '$targetPath' && chmod 644 '$targetPath'; fi",
+                    applyCommand = "cp $qStaging $qTarget && chmod 644 $qTarget",
+                    revertCommand = "if [ -f $qBackup ]; then cp $qBackup $qTarget && chmod 644 $qTarget; fi",
                     summaryRu = "Запись фильтрующего файла $targetPath",
                 ),
             ),

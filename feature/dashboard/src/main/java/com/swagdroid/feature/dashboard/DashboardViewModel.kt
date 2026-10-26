@@ -193,6 +193,14 @@ class DashboardViewModel @Inject constructor(
         }
     }
 
+    fun exportVaultJson(onJsonReady: (String) -> Unit) {
+        viewModelScope.launch {
+            val model = passportFlow.value?.advisor?.deviceModel ?: android.os.Build.MODEL
+            val exported = vaultManager.exportSnapshotsJson(model)
+            onJsonReady(exported)
+        }
+    }
+
     fun developerOptionsIntent(): Intent = privilegeManager.buildDeveloperOptionsIntent()
     fun aboutPhoneIntent(): Intent = privilegeManager.buildAboutPhoneIntent()
     fun shizukuIntent(): Intent = privilegeManager.buildOpenOrGetShizukuIntent()

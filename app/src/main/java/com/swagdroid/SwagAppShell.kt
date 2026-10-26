@@ -9,6 +9,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -25,6 +26,7 @@ import com.swagdroid.feature.security.SecurityCenterRoute
 @Composable
 fun SwagAppShell() {
     var currentTab by rememberSaveable { mutableStateOf(SwagTab.DASHBOARD) }
+    var vaultSheetTrigger by rememberSaveable { mutableIntStateOf(0) }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -58,6 +60,7 @@ fun SwagAppShell() {
             SwagTab.DASHBOARD -> {
                 DashboardRoute(
                     onNavigateToTab = { target -> currentTab = target },
+                    openVaultTrigger = vaultSheetTrigger,
                     modifier = Modifier.padding(innerPadding),
                 )
             }
@@ -73,7 +76,10 @@ fun SwagAppShell() {
             SwagTab.SECURITY -> {
                 SecurityCenterRoute(
                     contentPadding = innerPadding,
-                    onOpenVault = { currentTab = SwagTab.DASHBOARD },
+                    onOpenVault = {
+                        vaultSheetTrigger++
+                        currentTab = SwagTab.DASHBOARD
+                    },
                 )
             }
         }

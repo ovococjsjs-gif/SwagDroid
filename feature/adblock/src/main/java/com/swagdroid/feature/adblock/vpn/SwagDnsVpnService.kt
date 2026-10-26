@@ -20,6 +20,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.DatagramPacket
@@ -28,11 +30,11 @@ import java.net.InetAddress
 import javax.inject.Inject
 
 /**
- * Ultra-lightweight split-route DNS-only local VPN sinkhole (`Tier 1: No-Root`).
+ * Dual-stack (IPv4 + IPv6) split-route DNS-only local VPN sinkhole (`Tier 1: No-Root`).
  *
- * Only packets addressed to virtual DNS IP `10.215.173.2/32` enter the TUN interface:
- * 99.9% of regular TCP/HTTPS/video traffic flows directly over hardware Wi-Fi/LTE with
- * zero throughput loss and negligible battery usage.
+ * Only DNS packets targeting virtual resolvers `10.215.173.2/32` and `fd00:57a6:d01d::2/128`
+ * enter the TUN interface: 99.9% of regular TCP/HTTPS/video traffic flows directly over
+ * hardware Wi-Fi/5G with zero throughput loss and zero IPv6 DNS leak.
  */
 @AndroidEntryPoint
 class SwagDnsVpnService : VpnService() {
@@ -41,6 +43,7 @@ class SwagDnsVpnService : VpnService() {
     lateinit var blocklistRepo: BlocklistRepository
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val upstreamSemaphore = Semaphore(MAX_CONCURRENT_DNS_UPSTREAMS)
     private var tunInterface: ParcelFileDescriptor? = null
     private var workerJob: Job? = null
 
@@ -66,9 +69,17 @@ class SwagDnsVpnService : VpnService() {
         val builder = Builder()
             .setSession("SwagDroid DNS Shield")
             .setMtu(1500)
-            .addAddress(VIRTUAL_TUN_CLIENT_IP, 30)
-            .addDnsServer(VIRTUAL_TUN_DNS_IP)
-            .addRoute(VIRTUAL_TUN_DNS_IP, 32)
+            .addAddress(VIRTUAL_TUN_CLIENT_IPV4, 30)
+            .addDnsServer(VIRTUAL_TUN_DNS_IPV4)
+            .addRoute(VIRTUAL_TUN_DNS_IPV4, 32)
+            // Dual-stack ULA IPv6 DNS sinkhole prevents LTE/5G IPv6 DNS bypasses
+            .addAddress(VIRTUAL_TUN_CLIENT_IPV6, 126)
+            .addDnsServer(VIRTUAL_TUN_DNS_IPV6)
+            .addRoute(VIRTUAL_TUN_DNS_IPV6, 128)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            builder.setMetered(false)
+        }
 
         runCatching { builder.addDisallowedApplication(packageName) }
         for (pkg in bypassedPackages) {
@@ -95,12 +106,12 @@ class SwagDnsVpnService : VpnService() {
                 val readLen = runCatching { input.read(readBuffer) }.getOrDefault(-1)
                 if (readLen <= 0) continue
 
-                val query = DnsPacketEngine.parseIpv4UdpDnsQuery(readBuffer, readLen) ?: continue
+                val query = DnsPacketEngine.parseIpUdpDnsQuery(readBuffer, readLen) ?: continue
                 val blocked = blocklistRepo.isBlocked(query.queriedDomain)
                 blocklistRepo.recordDnsDecision(query.queriedDomain, blocked)
 
                 if (blocked) {
-                    val nxPacket = DnsPacketEngine.buildNxDomainIpv4UdpResponse(query)
+                    val nxPacket = DnsPacketEngine.buildNxDomainResponse(query)
                     runCatching {
                         synchronized(output) {
                             output.write(nxPacket)
@@ -108,9 +119,10 @@ class SwagDnsVpnService : VpnService() {
                         }
                     }
                 } else if (upstreamAddr != null) {
-                    // Forward allowed query over protected UDP socket on a child coroutine
                     launch {
-                        forwardDnsQueryUpstream(query, upstreamAddr, output)
+                        upstreamSemaphore.withPermit {
+                            forwardDnsQueryUpstream(query, upstreamAddr, output)
+                        }
                     }
                 }
             }
@@ -136,19 +148,13 @@ class SwagDnsVpnService : VpnService() {
             socket.receive(respPacket)
 
             val answerPayload = respBuf.copyOfRange(0, respPacket.length)
-            val wrappedIpUdp = DnsPacketEngine.wrapDnsPayloadInIpv4Udp(
-                srcIp = query.dstIp,
-                dstIp = query.srcIp,
-                srcPort = query.dstPort,
-                dstPort = query.srcPort,
-                dnsPayload = answerPayload,
-            )
+            val wrappedIpUdp = DnsPacketEngine.wrapDnsPayloadForQuery(query, answerPayload)
             synchronized(tunOut) {
                 tunOut.write(wrappedIpUdp)
                 tunOut.flush()
             }
         } catch (_: Exception) {
-            // Timeout or unreachable network; client resolver will retry cleanly
+            // Timeout or transient network loss; Android resolver retries cleanly
         } finally {
             runCatching { socket?.close() }
         }
@@ -186,7 +192,7 @@ class SwagDnsVpnService : VpnService() {
             nm.createNotificationChannel(channel)
         }
         val notification = Notification.Builder(this, channelId)
-            .setContentTitle("SwagDroid DNS-щит активен")
+            .setContentTitle("SwagDroid DNS-щит активен (IPv4 + IPv6)")
             .setContentText("Фильтрация рекламы, трекеров и майнинг-пулов без потери скорости")
             .setSmallIcon(android.R.drawable.ic_secure)
             .setOngoing(true)
@@ -201,8 +207,11 @@ class SwagDnsVpnService : VpnService() {
         const val EXTRA_BYPASSED_PACKAGES = "extra_bypassed_packages"
 
         private const val NOTIFICATION_ID = 42053
-        private const val VIRTUAL_TUN_CLIENT_IP = "10.215.173.1"
-        private const val VIRTUAL_TUN_DNS_IP = "10.215.173.2"
+        private const val MAX_CONCURRENT_DNS_UPSTREAMS = 64
+        private const val VIRTUAL_TUN_CLIENT_IPV4 = "10.215.173.1"
+        private const val VIRTUAL_TUN_DNS_IPV4 = "10.215.173.2"
+        private const val VIRTUAL_TUN_CLIENT_IPV6 = "fd00:57a6:d01d::1"
+        private const val VIRTUAL_TUN_DNS_IPV6 = "fd00:57a6:d01d::2"
 
         private val _isRunning = MutableStateFlow(false)
         val isRunningFlow: StateFlow<Boolean> = _isRunning.asStateFlow()

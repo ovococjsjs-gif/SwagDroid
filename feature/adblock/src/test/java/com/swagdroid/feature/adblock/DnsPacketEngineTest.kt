@@ -46,6 +46,35 @@ class DnsPacketEngineTest {
     }
 
     @Test
+    fun `parses raw IPv6 UDP DNS query and synthesizes valid IPv6 NXDOMAIN response`() {
+        val dnsPayload = buildSampleDnsQuery("gulf.moneroocean.stream", txId = 0x77C1)
+        val srcV6 = ByteArray(16).apply { this[0] = 0xFD.toByte(); this[15] = 0x01 }
+        val dstV6 = ByteArray(16).apply { this[0] = 0xFD.toByte(); this[15] = 0x02 }
+        val rawIpv6Udp = DnsPacketEngine.wrapDnsPayloadInIpv6Udp(
+            srcIp = srcV6,
+            dstIp = dstV6,
+            srcPort = 54321,
+            dstPort = 53,
+            dnsPayload = dnsPayload,
+        )
+
+        val parsed = DnsPacketEngine.parseIpUdpDnsQuery(rawIpv6Udp)
+        assertNotNull(parsed)
+        assertEquals(6, parsed!!.ipVersion)
+        assertEquals("gulf.moneroocean.stream", parsed.queriedDomain)
+
+        val nxV6 = DnsPacketEngine.buildNxDomainResponse(parsed)
+        assertArrayEquals(dstV6, nxV6.copyOfRange(8, 24))
+        assertArrayEquals(srcV6, nxV6.copyOfRange(24, 40))
+        // Non-zero mandatory IPv6 UDP checksum at bytes 46..47
+        val udpCsum = ((nxV6[46].toInt() and 0xFF) shl 8) or (nxV6[47].toInt() and 0xFF)
+        assertTrue(udpCsum != 0)
+        // DNS RCODE=3 at offset 40 (IPv6) + 8 (UDP) + 2..3 (Flags) = 50..51
+        val flags = ((nxV6[50].toInt() and 0xFF) shl 8) or (nxV6[51].toInt() and 0xFF)
+        assertEquals(3, flags and 0x000F)
+    }
+
+    @Test
     fun `suffix domain matcher blocks subdomains and honors allowlist overrides`() {
         val blocked = setOf("doubleclick.net", "minexmr.com")
         val allowed = setOf("safe.doubleclick.net")

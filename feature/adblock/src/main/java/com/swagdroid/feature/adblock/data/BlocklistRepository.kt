@@ -4,20 +4,41 @@ import android.content.Context
 import com.swagdroid.feature.adblock.dns.DnsPacketEngine
 import com.swagdroid.feature.adblock.model.DnsQueryLogEntry
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
+
+@Serializable
+internal data class PersistedCustomDomainRules(
+    val blocked: Set<String> = emptySet(),
+    val allowed: Set<String> = emptySet(),
+)
 
 @Singleton
 class BlocklistRepository @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val ioMutex = Mutex()
+    private val loadedOnce = AtomicBoolean(false)
+    private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
+
     private val _seedDomains = MutableStateFlow<Set<String>>(emptySet())
     private val _customBlocked = MutableStateFlow<Set<String>>(emptySet())
     private val _customAllowed = MutableStateFlow<Set<String>>(emptySet())
@@ -35,9 +56,22 @@ class BlocklistRepository @Inject constructor(
         get() = (_seedDomains.value.size + _customBlocked.value.size)
 
     suspend fun ensureLoaded() = withContext(Dispatchers.IO) {
-        if (_seedDomains.value.isNotEmpty()) return@withContext
-        val raw = context.assets.open(SEED_ASSET_NAME).bufferedReader().use { it.readText() }
-        _seedDomains.value = parseDomainRulesText(raw)
+        if (loadedOnce.get()) return@withContext
+        ioMutex.withLock {
+            if (loadedOnce.get()) return@withLock
+            val raw = context.assets.open(SEED_ASSET_NAME).bufferedReader().use { it.readText() }
+            _seedDomains.value = parseDomainRulesText(raw)
+
+            val customFile = File(context.filesDir, CUSTOM_RULES_FILENAME)
+            if (customFile.exists()) {
+                runCatching {
+                    val saved = json.decodeFromString<PersistedCustomDomainRules>(customFile.readText())
+                    _customBlocked.value = saved.blocked.mapNotNull(::normalizeDomain).toSet()
+                    _customAllowed.value = saved.allowed.mapNotNull(::normalizeDomain).toSet()
+                }
+            }
+            loadedOnce.set(true)
+        }
     }
 
     fun isBlocked(domain: String): Boolean {
@@ -61,7 +95,7 @@ class BlocklistRepository @Inject constructor(
             wasBlocked = wasBlocked,
         )
         _recentLog.update { prev ->
-            (listOf(entry) + prev).take(60)
+            (listOf(entry) + prev).take(80)
         }
     }
 
@@ -74,6 +108,7 @@ class BlocklistRepository @Inject constructor(
             _customBlocked.update { it - clean }
             _customAllowed.update { it + clean }
         }
+        persistCustomRulesAsync()
         return true
     }
 
@@ -81,6 +116,7 @@ class BlocklistRepository @Inject constructor(
         val clean = domain.trim().lowercase()
         _customBlocked.update { it - clean }
         _customAllowed.update { it - clean }
+        persistCustomRulesAsync()
     }
 
     fun buildHostsFileContent(): String {
@@ -88,8 +124,29 @@ class BlocklistRepository @Inject constructor(
         return formatSystemHostsFile(effective)
     }
 
+    private fun persistCustomRulesAsync() {
+        val snapshot = PersistedCustomDomainRules(
+            blocked = _customBlocked.value,
+            allowed = _customAllowed.value,
+        )
+        ioScope.launch {
+            ioMutex.withLock {
+                runCatching {
+                    val target = File(context.filesDir, CUSTOM_RULES_FILENAME)
+                    val tmp = File(context.filesDir, "$CUSTOM_RULES_FILENAME.tmp")
+                    tmp.writeText(json.encodeToString(snapshot), Charsets.UTF_8)
+                    if (!tmp.renameTo(target)) {
+                        tmp.copyTo(target, overwrite = true)
+                        tmp.delete()
+                    }
+                }
+            }
+        }
+    }
+
     companion object {
         const val SEED_ASSET_NAME = "swag_blocklist_seed.txt"
+        private const val CUSTOM_RULES_FILENAME = "swag_adblock_custom_rules.json"
         private val VALID_DOMAIN_REGEX = Regex("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$")
 
         fun normalizeDomain(raw: String): String? {
@@ -101,10 +158,6 @@ class BlocklistRepository @Inject constructor(
             return s.takeIf { VALID_DOMAIN_REGEX.matches(it) }
         }
 
-        /**
-         * Parses plain domain lists, `0.0.0.0 domain` / `127.0.0.1 domain` hosts files,
-         * and AdBlock `||domain^` syntax into a clean lowercase domain set.
-         */
         fun parseDomainRulesText(rawText: String): Set<String> {
             val out = LinkedHashSet<String>()
             for (rawLine in rawText.lineSequence()) {

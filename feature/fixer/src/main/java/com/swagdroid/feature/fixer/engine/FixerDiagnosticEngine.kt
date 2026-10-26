@@ -871,7 +871,8 @@ class FixerDiagnosticEngine @Inject constructor(
                     .map { VaultMutationSpec.MutateAppOp(it, "READ_CLIPBOARD", "ignore") }
             }
             "sec_open_adb_tcp_5555" -> {
-                val prev = executor.execute("getprop service.adb.tcp.port").stdoutText.trim().ifEmpty { "-1" }
+                val rawPort = executor.execute("getprop service.adb.tcp.port").stdoutText.trim()
+                val prev = rawPort.toIntOrNull()?.coerceIn(-1, 65535) ?: -1
                 listOf(
                     VaultMutationSpec.MutateCustomShell(
                         applyCommand = "setprop service.adb.tcp.port -1",
@@ -895,9 +896,9 @@ class FixerDiagnosticEngine @Inject constructor(
                 ),
             )
             "perf_kernel_sched_vm_tune" -> {
-                val prevStats = executor.execute("cat /proc/sys/kernel/sched_schedstats").stdoutText.trim().ifEmpty { "1" }
-                val prevDirty = executor.execute("cat /proc/sys/vm/dirty_ratio").stdoutText.trim().ifEmpty { "20" }
-                val prevBgDirty = executor.execute("cat /proc/sys/vm/dirty_background_ratio").stdoutText.trim().ifEmpty { "10" }
+                val prevStats = executor.execute("cat /proc/sys/kernel/sched_schedstats").stdoutText.trim().toIntOrNull()?.coerceIn(0, 1) ?: 1
+                val prevDirty = executor.execute("cat /proc/sys/vm/dirty_ratio").stdoutText.trim().toIntOrNull()?.coerceIn(5, 90) ?: 20
+                val prevBgDirty = executor.execute("cat /proc/sys/vm/dirty_background_ratio").stdoutText.trim().toIntOrNull()?.coerceIn(1, 50) ?: 10
                 listOf(
                     VaultMutationSpec.MutateCustomShell(
                         applyCommand = "echo 0 > /proc/sys/kernel/sched_schedstats",

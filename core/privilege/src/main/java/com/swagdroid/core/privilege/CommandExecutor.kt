@@ -1,7 +1,6 @@
 package com.swagdroid.core.privilege
 
 import android.content.Context
-import android.content.pm.PackageManager
 import android.provider.Settings
 import com.swagdroid.core.model.PackageStateTarget
 import com.swagdroid.core.model.PrivilegeTier
@@ -14,6 +13,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
+import java.lang.reflect.Method
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -34,14 +35,43 @@ class AndroidCommandExecutor @Inject constructor(
     private val privilegeManager: PrivilegeManager,
 ) : PrivilegedCommandExecutor {
 
+    private val shizukuNewProcessMethod: Method? by lazy {
+        runCatching {
+            Shizuku::class.java.getDeclaredMethod(
+                "newProcess",
+                Array<String>::class.java,
+                Array<String>::class.java,
+                String::class.java,
+            ).apply { isAccessible = true }
+        }.getOrNull()
+    }
+
     override fun currentTier(): PrivilegeTier = privilegeManager.state.value.activeTier
 
     override suspend fun execute(command: String): ShellExecResult = withContext(Dispatchers.IO) {
         val tier = privilegeManager.state.value.activeTier
+        val timeoutMs = if (command.contains("package compile") || command.contains("fstrim")) {
+            HEAVY_COMMAND_TIMEOUT_MS
+        } else {
+            DEFAULT_COMMAND_TIMEOUT_MS
+        }
+
         when (tier) {
-            PrivilegeTier.ROOT -> executeViaLibsu(command)
-            PrivilegeTier.ADB_SHIZUKU -> executeViaShizuku(command)
-            PrivilegeTier.BASIC -> executeLocalUnprivileged(command)
+            PrivilegeTier.ROOT -> {
+                // Support both standalone su (Magisk/KSU/APatch via libsu) AND Sui / Shizuku UID 0!
+                val libsuReady = runCatching { Shell.isAppGrantedRoot() == true }.getOrDefault(false)
+                val shizukuRootReady = runCatching {
+                    Shizuku.pingBinder() && Shizuku.getUid() == 0
+                }.getOrDefault(false)
+
+                when {
+                    libsuReady -> executeViaLibsu(command, timeoutMs)
+                    shizukuRootReady -> executeViaShizuku(command, PrivilegeTier.ROOT, timeoutMs)
+                    else -> executeViaLibsu(command, timeoutMs)
+                }
+            }
+            PrivilegeTier.ADB_SHIZUKU -> executeViaShizuku(command, PrivilegeTier.ADB_SHIZUKU, timeoutMs)
+            PrivilegeTier.BASIC -> executeLocalUnprivileged(command, timeoutMs)
         }
     }
 
@@ -119,7 +149,6 @@ class AndroidCommandExecutor @Inject constructor(
         val res = execute("cmd appops get $qPkg $qOp")
         if (!res.isSuccess) return "default"
 
-        // Typical line: "READ_CLIPBOARD: allow; time=+2m14s ago" or "Uid mode: ignore"
         for (line in res.stdout) {
             val trimmed = line.trim()
             val afterColon = trimmed.substringAfter(':', "").trim()
@@ -144,10 +173,22 @@ class AndroidCommandExecutor @Inject constructor(
         return execute("cmd appops set $qPkg $qOp $qMode")
     }
 
-    private fun executeViaLibsu(command: String): ShellExecResult {
+    private fun executeViaLibsu(command: String, timeoutMs: Long): ShellExecResult {
         val outList = ArrayList<String>()
         val errList = ArrayList<String>()
-        val result = Shell.cmd(command).to(outList, errList).exec()
+        val job = Shell.cmd(command).to(outList, errList)
+        val result = runCatching {
+            val future = job.submit()
+            future.get(timeoutMs, TimeUnit.MILLISECONDS)
+        }.getOrElse { err ->
+            return ShellExecResult(
+                command = command,
+                exitCode = 124,
+                stdout = outList,
+                stderr = errList + listOf("Root command timeout/error: ${err.message ?: "exceeded ${timeoutMs}ms"}"),
+                executedAtTier = PrivilegeTier.ROOT,
+            )
+        }
         return ShellExecResult(
             command = command,
             exitCode = result.code,
@@ -157,14 +198,14 @@ class AndroidCommandExecutor @Inject constructor(
         )
     }
 
-    private suspend fun executeViaShizuku(command: String): ShellExecResult {
+    private suspend fun executeViaShizuku(
+        command: String,
+        reportedTier: PrivilegeTier,
+        timeoutMs: Long,
+    ): ShellExecResult {
         return runCatching {
-            val method = Shizuku::class.java.getDeclaredMethod(
-                "newProcess",
-                Array<String>::class.java,
-                Array<String>::class.java,
-                String::class.java,
-            ).apply { isAccessible = true }
+            val method = shizukuNewProcessMethod
+                ?: error("Shizuku process bridge unavailable on this API version")
 
             val process = method.invoke(
                 null,
@@ -173,22 +214,22 @@ class AndroidCommandExecutor @Inject constructor(
                 null,
             ) as Process
 
-            readProcessOutput(process, command, PrivilegeTier.ADB_SHIZUKU)
+            readProcessOutputBounded(process, command, reportedTier, timeoutMs)
         }.getOrElse { error ->
             ShellExecResult(
                 command = command,
                 exitCode = -1,
                 stdout = emptyList(),
-                stderr = listOf(error.message ?: "Shizuku execution failed"),
-                executedAtTier = PrivilegeTier.ADB_SHIZUKU,
+                stderr = listOf(error.cause?.message ?: error.message ?: "Shizuku execution failed"),
+                executedAtTier = reportedTier,
             )
         }
     }
 
-    private suspend fun executeLocalUnprivileged(command: String): ShellExecResult {
+    private suspend fun executeLocalUnprivileged(command: String, timeoutMs: Long): ShellExecResult {
         return runCatching {
             val process = ProcessBuilder("sh", "-c", command).start()
-            readProcessOutput(process, command, PrivilegeTier.BASIC)
+            readProcessOutputBounded(process, command, PrivilegeTier.BASIC, timeoutMs)
         }.getOrElse { error ->
             ShellExecResult(
                 command = command,
@@ -200,24 +241,52 @@ class AndroidCommandExecutor @Inject constructor(
         }
     }
 
-    private suspend fun readProcessOutput(
+    private suspend fun readProcessOutputBounded(
         process: Process,
         command: String,
         tier: PrivilegeTier,
+        timeoutMs: Long,
     ): ShellExecResult = coroutineScope {
         val stdoutDeferred = async(Dispatchers.IO) {
-            process.inputStream.bufferedReader().useLines { it.toList() }
+            runCatching {
+                process.inputStream.bufferedReader().useLines { seq ->
+                    seq.take(MAX_OUTPUT_LINES).toList()
+                }
+            }.getOrDefault(emptyList())
         }
         val stderrDeferred = async(Dispatchers.IO) {
-            process.errorStream.bufferedReader().useLines { it.toList() }
+            runCatching {
+                process.errorStream.bufferedReader().useLines { seq ->
+                    seq.take(MAX_ERR_LINES).toList()
+                }
+            }.getOrDefault(emptyList())
         }
-        val exitCode = process.waitFor()
+
+        val finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
+        if (!finished) {
+            runCatching { process.destroyForcibly() }
+            return@coroutineScope ShellExecResult(
+                command = command,
+                exitCode = 124,
+                stdout = stdoutDeferred.await(),
+                stderr = stderrDeferred.await() + listOf("Команда прервана по защитному таймауту (${timeoutMs / 1000} с)"),
+                executedAtTier = tier,
+            )
+        }
+
         ShellExecResult(
             command = command,
-            exitCode = exitCode,
+            exitCode = process.exitValue(),
             stdout = stdoutDeferred.await(),
             stderr = stderrDeferred.await(),
             executedAtTier = tier,
         )
+    }
+
+    companion object {
+        private const val DEFAULT_COMMAND_TIMEOUT_MS = 35_000L
+        private const val HEAVY_COMMAND_TIMEOUT_MS = 180_000L
+        private const val MAX_OUTPUT_LINES = 8_000
+        private const val MAX_ERR_LINES = 1_000
     }
 }

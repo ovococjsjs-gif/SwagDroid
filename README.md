@@ -1,67 +1,75 @@
-# SwagDroid 🛡️⚡
+<p align="center">
+  <img src="docs/assets/swagdroid_icon.png" width="168" alt="SwagDroid Official Logo" />
+</p>
 
-**SwagDroid** — открытый универсальный швейцарский нож для Android-смартфонов: диагностика и программный ремонт проблем с точками отката (**StateVault**), честная очистка памяти, деблоатер и оптимизатор системы, анти-майнер / анти-троян и системный AdBlock без навязанной рекламы и подписок.
+<h1 align="center">SwagDroid v1.0.0 🛡️⚡</h1>
 
----
-
-## ✨ Ключевые особенности архитектуры
-
-1. **Трёхуровневое ядро привилегий (`:core:privilege`) без танцев с ПК**:
-   - **Tier 1 — Базовый (`No-Root`)**: работает сразу после установки.
-   - **Tier 2 — Суперправа за 45 секунд (`Wireless ADB + Shizuku`, `UID 2000`)**: активируется прямо на экране смартфона (Android 11+) по 6-значному коду сопряжения — открывает ~90% системных возможностей **без разблокировки загрузчика, без потери данных и с полностью рабочими банковскими приложениями и NFC**.
-   - **Tier 3 — Полный Root (`libsu`: Magisk, KernelSU, APatch, `UID 0`)** + встроенный **Root-советник** с анализом ядра GKI 2.0, схемы A/B, Verified Boot и специфики бренда.
-2. **Транзакционный движок точек восстановления (`:core:vault` / `StateVault`)**:
-   - Перед любым твиком или фиксом SwagDroid считывает текущие системные параметры (`Settings.Global`/`Secure`/`System`, состояния пакетов, режимы `AppOps`) и сохраняет точку отката в локальную БД Room.
-   - Любое изменение можно откатить в 1 тап (в порядке `LIFO`), либо выполнить аварийный сброс всех активных изменений.
-3. **5 функциональных столпов**:
-   - **Пульс и Паспорт железа (`:feature:dashboard`)**: индекс здоровья 0–100, реальная оценка остаточной ёмкости и циклов батареи, мониторинг накопителя UFS, RAM и ZRAM.
-   - **Программный Фиксер проблем**: автодиагностика и рецепты лечения реальных сбоев (сеть и Captive Portal, пуш-уведомления и Doze, ночной разряд `WakeLock`, ошибки установки APK, сбитый DPI/WebView).
-   - **Оптимизатор и Debloater**: в духе *Windows Optimizer* + база пакетов *Universal Android Debloater NG*, дробные анимации `0.5x`, компиляция `ART speed-profile`, защита буфера обмена (`Clipboard Guard`).
-   - **Умная очистка**: поиск остатков удалённых приложений, бережная разборка кэша мессенджеров (Telegram, WhatsApp, TikTok, VK), удаление зависших сессий установщика и дубликатов.
-   - **Защита и 3-режимный AdBlock**: конвейер решений в духе *MinerSearch* + офлайн-сканер сигнатур и скрытых рекламных оверлеев + AdBlock (`Hosts` / `Private DNS DoT` без занятия слота VPN / локальный фаервол).
+<p align="center">
+  <b>Открытый швейцарский нож для Android-смартфонов (GPL-3.0)</b><br/>
+  Программный ремонт 12 подсистем с точками отката <b>StateVault</b> · Умная очистка с бронёй паролей · Оптимизатор PRO + Debloater (4 123 пакета UAD-ng) · Реальный Антивирус / Анти-Майнер · 3-режимный AdBlock (IPv4 + IPv6)
+</p>
 
 ---
 
-## 🏗️ Структура модулей проекта
+## ✨ Ключевые инженерные преимущества `v1.0.0`
+
+1. **Трёхуровневое ядро привилегий (`:core:privilege`) без ПК и потери гарантии**:
+   - **Tier 1 — Базовый (`No-Root`)**: работает сразу после установки APK.
+   - **Tier 2 — Суперправа за 45 секунд (`Wireless ADB + Shizuku`, `UID 2000`)**: активируется прямо с экрана смартфона (Android 11+) по 6-значному коду сопряжения — открывает ~90% системных возможностей **без разблокировки загрузчика, без потери данных и с полностью рабочими банковскими приложениями и NFC**.
+   - **Tier 3 — Полный Root (`libsu` + `Sui / Shizuku UID 0`: Magisk, KernelSU, APatch)** + встроенный **Root-советник** с анализом GKI 2.0, A/B слотов и Verified Boot.
+   - Встроенный сторожевой таймер команд (`35 с` / `180 с`) с защитой от зависаний системных утилит.
+2. **Транзакционный движок точек восстановления (`:core:vault` / `StateVault` + `SystemBrickGuard`)**:
+   - Сериализованные через `Mutex` транзакции с записью точного состояния `Settings.{Global,Secure,System}`, пакетов и `AppOps` в Room **до** внесения изменений и 1-тап `LIFO`-откатом.
+   - **Анти-бутлуп щит `SystemBrickGuard`**: математически исключает заморозку или отключение критических пакетов Android (`systemui`, `settings`, `phone`, `packageinstaller`, `permissioncontroller`, `shizuku`, `magisk`, `kernelsu`, `swagdroid`) из любого модуля или JSON-профиля.
+3. **5 боевых модулей без рекламы, трекеров и облачной телеметрии**:
+   - **Пульс и Паспорт железа (`:feature:dashboard`)**: индекс здоровья `0–100`, износ и циклы АКБ, UFS/RAM/ZRAM, мастер Wireless ADB, Root-советник и экспорт `StateVault` в JSON.
+   - **Фиксер проблем (`:feature:fixer`)**: **53 сценария** автодиагностики и ремонта по **всем 12 подсистемам телефона** + 5-точечный **Реаниматор пуш-уведомлений**.
+   - **Оптимизатор PRO v2 (`:feature:optimizer`)**: 7 пресетов + портативные JSON-профили, 24 системных/ядерных/сетевых твика, Тюнер статус-бара и Immersive-режима, Android Game Mode + ART `dex2oat` и Debloater на **4 123 пакета `UAD-ng`** на русском языке.
+   - **Умная очистка (`:feature:cleaner`)**: двухконтурная **Броня паролей, аккаунтов, 2FA и автозаполнения (включена по умолчанию, 0 вызовов `pm clear`)**, защита от `symlink-escape` атак, `CorpseFinder`, Сейф мессенджеров (Telegram/WhatsApp/VK/TikTok/Viber) и `SHA-256` + `dHash` дедупликатор фото.
+   - **Антивирус, Анти-Майнер и AdBlock 3-в-1 (`:feature:security` + `:feature:adblock`)**: фильтр Блума `SHA-256`, потоковый `64 КБ` сканер скрытых криптомайнеров (`XMRig`/`Stratum`) и `Exodus` трекеров (`32 SDK` в `classes.dex`), персистентный Карантин `StateVault`, а также Dual-Stack (`IPv4 + IPv6`) DNS-щит без Root, системный `Private DNS DoT` без занятия слота VPN и `Systemless /etc/hosts` для Root.
+
+---
+
+## 🏗️ Структура 11 модулей проекта
 
 ```text
 SwagDroid/
-├── app/                   # Главная оболочка, навигация Material 3, манифест и иконка
+├── app/                   # Оболочка v1.0.0, адаптивные иконки SwagDroid, R8-правила, офлайн Crash Black-Box
 ├── core/
-│   ├── model/             # Доменные модели привилегий, паспорта железа и StateVault
-│   ├── designsystem/      # Тема Material 3 (OLED Dark / Light), векторные иконки, UI-компоненты
-│   ├── privilege/         # Движок команд (Local / Shizuku UID 2000 / Root libsu) + паспорт и Root-советник
-│   └── vault/             # Транзакционное хранилище точек восстановления Room + LIFO-откат
+│   ├── model/             # Доменные модели привилегий, паспорта железа и полиморфных операций StateVault
+│   ├── designsystem/      # Тема Material 3 (OLED Dark / Light), векторные иконки, фирменная эмблема
+│   ├── privilege/         # Движок команд (Local / Shizuku UID 2000 / Sui & libsu UID 0) с таймаут-защитой
+│   └── vault/             # Транзакционное хранилище Room + Mutex + анти-бутлуп щит SystemBrickGuard
 ├── feature/
-│   ├── dashboard/         # Главный экран «Пульс», мастер Беспроводного ADB, Root-советник и журнал StateVault
-│   ├── fixer/             # Доктор системы: 53 диагностики и авто-ремонта по всем 12 подсистемам телефона + Реаниматор пушей
-│   ├── optimizer/         # Оптимизатор PRO v2: 7 пресетов + JSON, 24 твика, Тюнер UI, Game Mode, ART и Debloater (4 123 UAD-ng)
-│   ├── cleaner/           # Умная очистка с двухконтурной Бронёй паролей/автозаполнения, Сейфом мессенджеров и Дедупликатором
-│   ├── adblock/           # 3-режимный AdBlock (Split-route RFC-1035 DNS VPN / Системный DoT без слота VPN / Root systemless hosts)
-│   └── security/          # Антивирус (Bloom SHA-256), Анти-Майнер (XMRig/Stratum), Карантин StateVault и Радар трекеров Exodus DEX
+│   ├── dashboard/         # Экран «Пульс», мастер Беспроводного ADB, Root-советник и экспорт StateVault JSON
+│   ├── fixer/             # Доктор системы: 53 диагностики и авто-ремонта по 12 подсистемам + Реаниматор пушей
+│   ├── optimizer/         # Оптимизатор PRO v2: 7 пресетов + JSON, 24 твика, Тюнер UI, Game Mode и 4 123 UAD-ng
+│   ├── cleaner/           # Умная очистка с Бронёй паролей/аккаунтов, защитой от симлинков и Дедупликатором
+│   ├── adblock/           # 3-режимный AdBlock (Dual-Stack IPv4/IPv6 DNS VPN / DoT без слота VPN / Root hosts)
+│   └── security/          # Антивирус (Bloom SHA-256), Анти-Майнер, персистентный Карантин и Exodus DEX Радар
+├── scripts/
+│   └── build-release.sh   # Единый скрипт запуска всех JUnit-тестов и сборки Debug + Release APK
 └── docs/
-    ├── RESEARCH_AND_PLAN.md                       # Полный инженерный ресерч и дорожная карта этапов 1–5
+    ├── RESEARCH_AND_PLAN.md                       # Инженерный ресерч и дорожная карта проекта
     ├── STAGE2_FIXER_AND_OPTIMIZER_CATALOG.md      # Каталог 12 подсистем Фиксера и базы Оптимизатора
-    ├── STAGE3_CLEANER_AND_OPTIMIZER_PRO.md        # Архитектура Брони паролей в Очистке и расширения Оптимизатора PRO v2
-    ├── STAGE4_SECURITY_ANTIVIRUS_AND_ADBLOCK.md   # Архитектура Антивируса/Анти-Майнера, Карантина и 3-режимного AdBlock
-    └── ci/github-actions-build.yml                # Готовый workflow облачной сборки APK (активируется на финальном этапе)
+    ├── STAGE3_CLEANER_AND_OPTIMIZER_PRO.md        # Архитектура Брони паролей и Оптимизатора PRO v2
+    ├── STAGE4_SECURITY_ANTIVIRUS_AND_ADBLOCK.md   # Архитектура Антивируса/Анти-Майнера и AdBlock 3-в-1
+    ├── STAGE5_RELEASE_AUDIT_AND_BUILD.md          # Финальный security-аудит, харденинг и выпуск v1.0.0
+    └── ci/github-actions-build.yml                # Workflow облачной сборки Debug + R8 Release APK
 ```
 
 ---
 
-## 🚀 Сборка проекта
+## 🚀 Полная сборка `SwagDroid v1.0.0`
 
-### Локально (Android Studio / CLI)
-Требуется **JDK 17+** (рекомендуется JDK 21) и **Android SDK 37**:
-
+### Вариант 1 — Скриптом в 1 команду (JDK 21 + Android SDK 37)
 ```bash
-./gradlew testDebugUnitTest
-./gradlew assembleDebug
+./scripts/build-release.sh
 ```
-Готовый APK появится в `app/build/outputs/apk/debug/app-debug.apk`.
+Скрипт последовательно запускает модульные тесты всех 11 модулей (`testDebugUnitTest`), собирает отладочный `app-debug.apk` (`com.swagdroid.debug`) и сжатый R8 подписанный релизный **`app/build/outputs/apk/release/app-release.apk`** (`com.swagdroid` `v1.0.0`), готовый к прямой установке на смартфон.
 
-### Автоматическая облачная сборка (GitHub Actions)
-Готовый шаблон пайплайна подготовлен в [`docs/ci/github-actions-build.yml`](docs/ci/github-actions-build.yml) для сборки финального APK после завершения всех этапов разработки.
+### Вариант 2 — Облачная сборка в GitHub Actions (без локального Android SDK)
+Поместите [`docs/ci/github-actions-build.yml`](docs/ci/github-actions-build.yml) в `.github/workflows/build.yml` на GitHub и запустите workflow **`SwagDroid v1.0.0 Full Build & Tests`** — готовые APK появятся во вкладке **Artifacts**.
 
 ---
 

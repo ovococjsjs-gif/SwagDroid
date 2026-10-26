@@ -1,8 +1,7 @@
--keepattributes *Annotation*, InnerClasses
--dontnote kotlinx.serialization.AnnotationsKt
+# Keep @Serializable models & polymorphic VaultOperation serializers under R8
+-keep,includedescriptorclasses class com.swagdroid.core.model.**$$serializer { *; }
+-keep @kotlinx.serialization.Serializable class com.swagdroid.core.model.** { *; }
 -keepclassmembers class com.swagdroid.core.model.** {
     *** Companion;
-}
--keepclasseswithmembers class com.swagdroid.core.model.** {
     kotlinx.serialization.KSerializer serializer(...);
 }

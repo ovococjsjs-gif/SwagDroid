@@ -202,6 +202,39 @@ class SecurityPipelineEngine @Inject constructor(
                     ),
                 )
             }
+
+            // Scanner 4B: Pre-Android-6 targetSdk (<23) Runtime-Permission Bypass & Debuggable Build Check
+            val targetSdk = appInfo.targetSdkVersion
+            val isDebuggable = (appInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+            if (targetSdk in 1..22 && (readsSms || canDrawOverlays || canInstallPackages)) {
+                signals.add(
+                    RawThreatSignal(
+                        targetKey = "pkg:$pkg",
+                        displayTitle = label,
+                        packageName = pkg,
+                        apkFilePath = appInfo.sourceDir,
+                        kind = ThreatObjectKind.PRIVILEGE_ABUSE,
+                        severity = ThreatSeverity.HIGH,
+                        recommendedAction = ThreatActionType.QUARANTINE_SUSPEND,
+                        reasonRu = "Устаревший targetSdk=$targetSdk в сочетании с доступом к SMS/оверлеям позволяет обходить запросы разрешений Android!",
+                        technicalEvidence = "targetSdkVersion=$targetSdk, sms=$readsSms, overlay=$canDrawOverlays",
+                    ),
+                )
+            } else if (isDebuggable && canInstallPackages) {
+                signals.add(
+                    RawThreatSignal(
+                        targetKey = "pkg:$pkg",
+                        displayTitle = label,
+                        packageName = pkg,
+                        apkFilePath = appInfo.sourceDir,
+                        kind = ThreatObjectKind.SIGNATURE_MALWARE,
+                        severity = ThreatSeverity.MEDIUM,
+                        recommendedAction = ThreatActionType.REVIEW_MANUAL,
+                        reasonRu = "Отладочная сборка (FLAG_DEBUGGABLE) с правом установки сторонних APK",
+                        technicalEvidence = "FLAG_DEBUGGABLE=true + REQUEST_INSTALL_PACKAGES",
+                    ),
+                )
+            }
         }
 
         // Scanner 5A: Scan loose files in /sdcard/Download for EICAR / Malware SHA-256 Bloom hits
@@ -392,6 +425,7 @@ class SecurityPipelineEngine @Inject constructor(
 
     private fun inspectApkZipForMinerMarkers(apkFile: File): List<String> = runCatching {
         val hits = LinkedHashSet<String>()
+        val chunkBuf = ByteArray(STREAM_CHUNK_BYTES)
         ZipFile(apkFile).use { zip ->
             val entries = zip.entries()
             while (entries.hasMoreElements()) {
@@ -400,9 +434,16 @@ class SecurityPipelineEngine @Inject constructor(
                 if (name.contains("xmrig")) {
                     hits.add("Файл майнера в APK: ${entry.name}")
                 }
-                if (!entry.isDirectory && (name.startsWith("assets/") || name.startsWith("lib/")) && entry.size in 16..4_000_000) {
-                    val bytes = zip.getInputStream(entry).use { it.readBytes() }
-                    hits.addAll(detectMinerMarkersInBytes(bytes))
+                if (!entry.isDirectory && (name.startsWith("assets/") || name.startsWith("lib/")) && entry.size in 16..25_000_000) {
+                    zip.getInputStream(entry).use { inp ->
+                        scanStreamWithOverlap(inp, chunkBuf) { windowAscii ->
+                            for ((marker, labelRu) in SecuritySignaturesCatalog.CRYPTO_MINER_MARKERS) {
+                                if (windowAscii.contains(marker, ignoreCase = true)) {
+                                    hits.add("$labelRu ($marker)")
+                                }
+                            }
+                        }
+                    }
                 }
                 if (hits.size >= 4) break
             }
@@ -412,30 +453,50 @@ class SecurityPipelineEngine @Inject constructor(
 
     private fun inspectApkDexForTrackers(apkFile: File): List<TrackerSdkSignature> = runCatching {
         val matched = LinkedHashMap<String, TrackerSdkSignature>()
+        val chunkBuf = ByteArray(STREAM_CHUNK_BYTES)
         ZipFile(apkFile).use { zip ->
             val entries = zip.entries()
             while (entries.hasMoreElements()) {
                 val entry = entries.nextElement()
                 if (!entry.isDirectory && entry.name.startsWith("classes") && entry.name.endsWith(".dex")) {
-                    // Read up to 12 MB per DEX string pool (class descriptors sit in the front string table of DEX!)
-                    val cap = minOf(entry.size.takeIf { it > 0 } ?: 8_000_000L, 12_000_000L).toInt()
-                    val buf = ByteArray(cap)
-                    var offset = 0
                     zip.getInputStream(entry).use { inp ->
-                        while (offset < cap) {
-                            val r = inp.read(buf, offset, cap - offset)
-                            if (r <= 0) break
-                            offset += r
+                        scanStreamWithOverlap(inp, chunkBuf) { windowAscii ->
+                            for (sig in SecuritySignaturesCatalog.EXODUS_TRACKER_SIGNATURES) {
+                                if (sig.id !in matched && windowAscii.contains(sig.dexMarkerAscii)) {
+                                    matched[sig.id] = sig
+                                }
+                            }
                         }
-                    }
-                    for (sig in detectTrackersInDexBytes(buf, offset)) {
-                        matched[sig.id] = sig
                     }
                 }
             }
         }
         matched.values.toList()
     }.getOrDefault(emptyList())
+
+    /**
+     * Bounded 64 KB sliding-window stream scanner with 256-byte chunk overlap so markers split
+     * across read boundaries are still matched with <128 KB heap usage instead of 24 MB allocations.
+     */
+    private inline fun scanStreamWithOverlap(
+        input: java.io.InputStream,
+        chunkBuf: ByteArray,
+        onWindow: (String) -> Unit,
+    ) {
+        var tail = ""
+        while (true) {
+            val readLen = input.read(chunkBuf)
+            if (readLen <= 0) break
+            val current = String(chunkBuf, 0, readLen, Charsets.ISO_8859_1)
+            val combined = if (tail.isEmpty()) current else tail + current
+            onWindow(combined)
+            tail = if (combined.length > STREAM_OVERLAP_BYTES) {
+                combined.substring(combined.length - STREAM_OVERLAP_BYTES)
+            } else {
+                combined
+            }
+        }
+    }
 
     private fun computeSha256(file: File): String = runCatching {
         val md = MessageDigest.getInstance("SHA-256")
@@ -451,6 +512,8 @@ class SecurityPipelineEngine @Inject constructor(
     }.getOrDefault("")
 
     companion object {
+        private const val STREAM_CHUNK_BYTES = 65_536
+        private const val STREAM_OVERLAP_BYTES = 256
         private val SAFE_LOOPBACK_IPS = setOf("127.0.0.1", "0.0.0.0", "::1", "fe00::0", "ff00::0", "ff02::1", "ff02::2", "ff02::3")
 
         /**

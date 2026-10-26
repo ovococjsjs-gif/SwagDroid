@@ -485,7 +485,7 @@ class SystemTweaksController @Inject constructor(
             return@withContext VaultTransactionResult.Failure("Настройка vm.swappiness требует Root-доступа", true)
         }
         val clamped = targetSwappiness.coerceIn(10, 160)
-        val prev = executor.execute("cat /proc/sys/vm/swappiness").stdoutText.trim().ifEmpty { "60" }
+        val prev = executor.execute("cat /proc/sys/vm/swappiness").stdoutText.trim().toIntOrNull()?.coerceIn(0, 200) ?: 60
         vaultManager.applyTransaction(
             title = "ZRAM / VM Swappiness → $clamped",
             reason = "Баланс сжатия страниц памяти ядра Linux",
