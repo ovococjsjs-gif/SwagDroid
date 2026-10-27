@@ -1,0 +1,214 @@
+{
+  "commit": "42fcde7ac0ee802c7c5749de5b643aafa89fe421",
+  "branch": "arena/975757fb-swagdroid",
+  "runId": 40453959011,
+  "runUrl": "https://github.com/ovococjsjs-gif/SwagDroid/actions/runs/40453959011",
+  "checkRunId": 122022829656,
+  "conclusion": "success",
+  "jobs": [
+    {
+      "completedAt": "2026-10-27T05:20:55Z",
+      "conclusion": "success",
+      "databaseId": 122022829656,
+      "name": "Unit Tests + Debug & R8 Release APK",
+      "startedAt": "2026-10-27T05:12:10Z",
+      "status": "completed",
+      "steps": [
+        {
+          "conclusion": "success",
+          "name": "Set up job",
+          "number": 1,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Checkout repository",
+          "number": 2,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Set up JDK 21 (Temurin)",
+          "number": 3,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Run Tests & Build Debug + R8 Release APKs",
+          "number": 4,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Upload SwagDroid v1.0.0 Release APK (R8 Optimized & Signed)",
+          "number": 5,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Upload SwagDroid v1.0.0 Debug APK",
+          "number": 6,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Set up JDK 21 (Temurin)",
+          "number": 11,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Checkout repository",
+          "number": 12,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Complete job",
+          "number": 13,
+          "status": "completed"
+        }
+      ],
+      "url": "https://github.com/ovococjsjs-gif/SwagDroid/actions/runs/40453959011/job/122022829656"
+    }
+  ],
+  "unit": {
+    "totals": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 189,
+      "xmlFiles": 17
+    },
+    "modules": {
+      ":core:privilege": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 36
+      },
+      ":core:vault": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 62
+      },
+      ":feature:adblock": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 4
+      },
+      ":feature:cleaner": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 67
+      },
+      ":feature:dashboard": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 2
+      },
+      ":feature:fixer": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 10
+      },
+      ":feature:optimizer": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 3
+      },
+      ":feature:security": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 5
+      }
+    }
+  },
+  "android": {
+    "totals": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 12,
+      "xmlFiles": 2
+    },
+    "modules": {
+      ":app": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 8
+      },
+      ":core:vault": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 4
+      }
+    },
+    "device": {
+      "ro.build.version.sdk": "35",
+      "ro.build.version.release": "15",
+      "ro.product.cpu.abi": "x86_64",
+      "ro.hardware": "ranchu",
+      "ro.build.fingerprint": "google/sdk_gphone64_x86_64/emu64xa:15/AE3A.240806.043/12960925:userdebug/dev-keys"
+    },
+    "runners": {
+      "app": "com.swagdroid.debug.test/androidx.test.runner.AndroidJUnitRunner",
+      "core:vault": "com.swagdroid.core.vault.test/androidx.test.runner.AndroidJUnitRunner",
+      "transport": "adb am instrument; stock AndroidJUnitRunner",
+      "matchingDebugCertificateSha256": "5a6e49328ca0863af89d6a2e513ca060b723a38c79a1081211fe02d52334e033"
+    }
+  },
+  "artifacts": [
+    {
+      "id": 12711333206,
+      "name": "SwagDroid-v1.0.0-release-apk",
+      "size_in_bytes": 2385113,
+      "digest": "sha256:a2b7e6b65d1dc3d2d17c2e4099d51fe0201449b984c150626827b5254322cb73",
+      "expired": false,
+      "archive_download_url": "https://api.github.com/repos/ovococjsjs-gif/SwagDroid/actions/artifacts/12711333206/zip"
+    },
+    {
+      "id": 12711253422,
+      "name": "SwagDroid-v1.0.0-debug-apk",
+      "size_in_bytes": 13506756,
+      "digest": "sha256:f5ef8a7e76ec23b0cbaa70d81019f298e54b6e6a058e75a9b333438e21b8646b",
+      "expired": false,
+      "archive_download_url": "https://api.github.com/repos/ovococjsjs-gif/SwagDroid/actions/artifacts/12711253422/zip"
+    }
+  ],
+  "limits": [
+    "Android 15 API 35 x86_64 emulator only; no physical/OEM device validation",
+    "No Root/Shizuku operations in this file flow",
+    "Only explicitly selected synthetic files were deleted by instrumentation",
+    "No trash or undelete feature",
+    "No full-process-kill or power-loss test for the new DataStore receipt",
+    "External viewer compatibility and screenshot visual review not performed"
+  ],
+  "earlierRuns": [
+    {
+      "runId": 40449644569,
+      "result": "All 189 JVM tests passed; app instrumentation was terminated during in-process permission revocation"
+    },
+    {
+      "runId": 40450847424,
+      "result": "11/12 device cases passed; return-from-settings test timed out"
+    },
+    {
+      "runId": 40452094988,
+      "result": "189 unit +12 Android tests passed"
+    },
+    {
+      "runId": 40453117754,
+      "result": "After count-label polish, the permission-return test exposed repeated Back/window-event race"
+    }
+  ]
+}
