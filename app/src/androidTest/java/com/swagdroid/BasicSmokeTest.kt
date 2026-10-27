@@ -107,16 +107,15 @@ class BasicSmokeTest {
         compose.waitUntil(20_000) { foregroundPackage() == "com.android.settings" }
         storageAccess(true)
         compose.waitUntil(10_000) { Environment.isExternalStorageManager() }
-        repeat(3) {
-            if (foregroundPackage() == "com.android.settings") {
-                shell("input keyevent 4")
-                runCatching { automation.waitForIdle(500, 5_000) }
-            }
-        }
+        // Exactly one Back. Accessibility window events may lag; repeated Back based
+        // on a stale Settings root can accidentally finish the returned MainActivity.
+        shell("input keyevent 4")
         try {
-            compose.waitUntil(20_000) { exists("cleaner_scan") }
-        } catch (error: Exception) {
-            throw AssertionError("No scan entry after Settings: foreground=${foregroundPackage()}, storage=${Environment.isExternalStorageManager()}", error)
+            compose.waitUntil(20_000) {
+                foregroundPackage() == InstrumentationRegistry.getInstrumentation().targetContext.packageName && exists("cleaner_scan")
+            }
+        } catch (error: AssertionError) {
+            throw AssertionError("No scan entry after Settings: foreground=${foregroundPackage()}, activity=${compose.activityRule.scenario.state}, storage=${Environment.isExternalStorageManager()}", error)
         }
         compose.onNodeWithTag("cleaner_scan").assertIsEnabled()
         assertFalse(exists("cleanup_results"))
