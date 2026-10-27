@@ -69,6 +69,20 @@ class SummaryTest(unittest.TestCase):
         self.report("app").write_text("not XML")
         self.assertNotEqual(0, self.run_summary("--kind", "android", "--allow-empty").returncode)
 
+    def test_adb_and_connected_outputs_are_not_mixed(self):
+        self.report("app")
+        self.report("core/vault")
+        self.assertNotEqual(0, self.android("--android-source", "adb-smoke").returncode)
+        for module in ("app", "core/vault"):
+            connected = self.root / module / "build/outputs/androidTest-results/connected/debug/emulator/TEST-fixture.xml"
+            adb = self.root / module / "build/outputs/androidTest-results/adb-smoke/TEST-fixture.xml"
+            adb.parent.mkdir(parents=True)
+            adb.write_text(connected.read_text())
+        self.assertEqual(0, self.android("--android-source", "adb-smoke").returncode)
+        report = json.loads((self.root / "build/ci-android-validation-summary.json").read_text())
+        self.assertEqual(8, report["totals"]["tests"])
+        self.assertEqual("adb-smoke", report["androidSource"])
+
 
 if __name__ == "__main__":
     unittest.main()

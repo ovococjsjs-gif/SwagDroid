@@ -37,17 +37,20 @@ Fixture v1 воспроизводит таблицу исследованной 
 bash scripts/android-smoke.sh
 ```
 
-Внутри запускаются:
+Gradle компилирует настоящие instrumentation APK:
 
 ```bash
 ./gradlew :app:assembleDebugAndroidTest :core:vault:assembleDebugAndroidTest --stacktrace --no-daemon
-./gradlew :core:vault:connectedDebugAndroidTest :app:connectedDebugAndroidTest --stacktrace --no-daemon
 ```
 
-Результаты считываются из **Android instrumentation XML**, отдельно от обычных JVM XML:
+Собранные APK устанавливаются на созданный AVD. Их зарегистрированные компоненты `androidx.test.runner.AndroidJUnitRunner` определяются через `pm list instrumentation` и запускаются обычным `adb shell am instrument -w -r` с указанными тестовыми классами. Ни тесты, ни assertions не заменяются. Такой запуск не зависит от дополнительного host UTP runtime, загрузка которого остановила первый `connectedDebugAndroidTest` сетевой ошибкой после успешного запуска эмулятора.
+
+`instrumentation-to-junit.py` переводит настоящий протокол AndroidJUnitRunner в XML. Нужны совпадающие start/finish записи каждого теста, объявленное количество тестов, финальный код runner и отсутствие crash/abort. Просто строка `OK` не считается доказательством. Исходные протоколы сохраняются рядом с диагностикой.
+
+Результаты отделены и от JVM XML, и от отчётов Gradle connected:
 
 ```bash
-python3 scripts/summarize-junit.py --kind android --min-tests 8 \
+python3 scripts/summarize-junit.py --kind android --android-source adb-smoke --min-tests 8 \
   --require-module app --require-module core:vault --fail-on-skip
 ```
 

@@ -46,6 +46,7 @@ jobs:
             **/build/reports/tests/testDebugUnitTest/**
             core/vault/schemas/**
             **/build/outputs/androidTest-results/connected/**
+            **/build/outputs/androidTest-results/adb-smoke/**
             **/build/reports/androidTests/connected/**
             build/android-smoke/**
 

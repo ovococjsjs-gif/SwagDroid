@@ -50,7 +50,7 @@ from pathlib import Path
 root=Path(sys.argv[1])
 # Log download hosts may be unavailable to reviewers; publish bounded diagnostic text
 # through the ordinary check annotations instead of reporting only a generic timeout.
-for name in ("emulator.log", "emulator-version.txt", "acceleration.txt", "crash-logcat.txt", "avd.log", "avd-list.txt", "host-packages.log", "sdk-install.log", "tests.log"):
+for name in ("instrumentation-app.txt", "instrumentation-vault.txt", "installed-runners.txt", "test-install.log", "emulator.log", "emulator-version.txt", "acceleration.txt", "crash-logcat.txt", "avd.log", "avd-list.txt", "host-packages.log", "sdk-install.log", "tests.log"):
     path=root/name
     if not path.exists(): continue
     text="\n".join(path.read_text(errors="replace").splitlines()[-40:])[-3200:]
@@ -178,22 +178,44 @@ echo "=== Install and cold-launch the actual Debug APK ==="
 "$ADB" -s "$SERIAL" shell am start -W -n com.swagdroid.debug/com.swagdroid.MainActivity > "$OUTPUT/launch.txt"
 grep -q 'Status: ok' "$OUTPUT/launch.txt" || { cat "$OUTPUT/launch.txt"; fail "Cold launch failed"; }
 
-# Remove old XML, not application data, to ensure a failed task cannot reuse previous results.
-python3 - <<'PY'
+echo "=== Install the already compiled instrumentation APKs ==="
+mapfile -t app_tests < <(find app/build/outputs/apk/androidTest -name '*.apk' -type f)
+mapfile -t vault_tests < <(find core/vault/build/outputs/apk/androidTest -name '*.apk' -type f)
+[[ "${#app_tests[@]}" == 1 && "${#vault_tests[@]}" == 1 ]] || fail "Expected one instrumentation APK for each smoke module"
+"$ADB" -s "$SERIAL" install -r -t "${vault_tests[0]}" > "$OUTPUT/test-install.log" 2>&1
+"$ADB" -s "$SERIAL" install -r -t "${app_tests[0]}" >> "$OUTPUT/test-install.log" 2>&1
+"$ADB" -s "$SERIAL" shell pm list instrumentation > "$OUTPUT/installed-runners.txt"
+python3 - "$OUTPUT" <<'PYRUNNERS'
+import json,re,sys
+from pathlib import Path
+root=Path(sys.argv[1])
+rows=re.findall(r"instrumentation:(\S+) \(target=(\S+)\)", (root/"installed-runners.txt").read_text())
+app=[component for component,target in rows if target=="com.swagdroid.debug" and component.endswith("/androidx.test.runner.AndroidJUnitRunner")]
+vault=[component for component,target in rows if component.startswith("com.swagdroid.core.vault.") and component.endswith("/androidx.test.runner.AndroidJUnitRunner")]
+assert len(app)==1 and len(vault)==1, rows
+(root/"app-runner.txt").write_text(app[0])
+(root/"vault-runner.txt").write_text(vault[0])
+print("::notice title=Android runners::"+json.dumps({"app":app[0],"core:vault":vault[0],"transport":"adb am instrument; stock AndroidJUnitRunner"}))
+PYRUNNERS
+
+# Isolated XML output from the real runner protocol, distinct from Gradle UTP reports.
+python3 - <<'PYCLEAN'
 from pathlib import Path
 for module in (Path("app"),Path("core/vault")):
-    for xml in (module/"build/outputs/androidTest-results/connected").glob("**/TEST-*.xml"):
+    for xml in (module/"build/outputs/androidTest-results/adb-smoke").glob("**/TEST-*.xml"):
         xml.unlink()
-PY
+PYCLEAN
 
-echo "=== Real Android UI and Room migration tests ==="
-if ! timeout 900 ./gradlew :core:vault:connectedDebugAndroidTest :app:connectedDebugAndroidTest \
-  --stacktrace --no-daemon > "$OUTPUT/tests.log" 2>&1; then
-  python3 scripts/summarize-junit.py --kind android --allow-empty || true
-  tail -n 100 "$OUTPUT/tests.log"
-  fail "Connected instrumentation task failed; see Android test annotations and logs"
-fi
-python3 scripts/summarize-junit.py --kind android --min-tests 8 --require-module app --require-module core:vault --fail-on-skip
+echo "=== Real AndroidJUnitRunner UI and Room tests (ADB, no host UTP dependency) ==="
+failed=0
+if ! timeout 600 "$ADB" -s "$SERIAL" shell am instrument -w -r -e debug false   -e class com.swagdroid.core.vault.VaultMigrationInstrumentedTest   "$(cat "$OUTPUT/vault-runner.txt")" > "$OUTPUT/instrumentation-vault.txt" 2>&1; then failed=1; fi
+if ! python3 scripts/instrumentation-to-junit.py --input "$OUTPUT/instrumentation-vault.txt"   --output core/vault/build/outputs/androidTest-results/adb-smoke/TEST-VaultMigrationInstrumentedTest.xml   --class-name com.swagdroid.core.vault.VaultMigrationInstrumentedTest --min-tests 4; then failed=1; fi
+
+if ! timeout 600 "$ADB" -s "$SERIAL" shell am instrument -w -r -e debug false   -e class com.swagdroid.BasicSmokeTest   "$(cat "$OUTPUT/app-runner.txt")" > "$OUTPUT/instrumentation-app.txt" 2>&1; then failed=1; fi
+if ! python3 scripts/instrumentation-to-junit.py --input "$OUTPUT/instrumentation-app.txt"   --output app/build/outputs/androidTest-results/adb-smoke/TEST-BasicSmokeTest.xml   --class-name com.swagdroid.BasicSmokeTest --min-tests 4; then failed=1; fi
+
+if ! python3 scripts/summarize-junit.py --kind android --android-source adb-smoke --min-tests 8   --require-module app --require-module core:vault --fail-on-skip; then failed=1; fi
+[[ "$failed" == 0 ]] || fail "Real Android instrumentation failed or was incomplete; no pass is inferred from compilation"
 
 "$ADB" -s "$SERIAL" exec-out run-as com.swagdroid.debug cat files/swag_last_crash.log > "$OUTPUT/app-crash.txt" 2>/dev/null || true
 if grep -q 'Offline Crash Black-Box' "$OUTPUT/app-crash.txt"; then

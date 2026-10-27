@@ -25,12 +25,13 @@ def main():
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--allow-empty", action="store_true", help="Only for a build step that already failed")
     parser.add_argument("--kind", choices=("unit", "android"), default="unit")
+    parser.add_argument("--android-source", choices=("connected", "adb-smoke"), default="connected")
     parser.add_argument("--min-tests", type=int, default=1)
     parser.add_argument("--require-module", action="append", default=[])
     parser.add_argument("--fail-on-skip", action="store_true")
     args = parser.parse_args()
     root = args.root.resolve()
-    pattern = "**/build/test-results/testDebugUnitTest/TEST-*.xml" if args.kind == "unit" else "**/build/outputs/androidTest-results/connected/**/TEST-*.xml"
+    pattern = "**/build/test-results/testDebugUnitTest/TEST-*.xml" if args.kind == "unit" else f"**/build/outputs/androidTest-results/{args.android_source}/**/TEST-*.xml"
     files = sorted(root.glob(pattern))
     label = "JUnit" if args.kind == "unit" else "Android instrumentation"
     modules = defaultdict(lambda: dict(tests=0, failures=0, errors=0, skipped=0))
@@ -62,7 +63,7 @@ def main():
     totals = {key: sum(stats[key] for stats in modules.values()) for key in ("tests", "failures", "errors", "skipped")}
     required = {":" + module.strip(":") for module in args.require_module}
     missing_modules = sorted(required.difference(modules))
-    report = {"kind": args.kind, "missingModules": missing_modules, "headSha": os.environ.get("GITHUB_SHA"), "xmlFiles": len(files), "totals": totals, "modules": dict(sorted(modules.items())), "malformed": malformed, "failedCases": failed_cases}
+    report = {"kind": args.kind, "androidSource": args.android_source if args.kind == "android" else None, "missingModules": missing_modules, "headSha": os.environ.get("GITHUB_SHA"), "xmlFiles": len(files), "totals": totals, "modules": dict(sorted(modules.items())), "malformed": malformed, "failedCases": failed_cases}
     output = root / ("build/ci-validation-summary.json" if args.kind == "unit" else "build/ci-android-validation-summary.json")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -71,8 +72,10 @@ def main():
         annotation("warning" if args.allow_empty else "error", label + " unavailable", "No JUnit XML found; tests have not been confirmed.")
     else:
         annotation("notice", label + " totals", json.dumps({"xmlFiles": len(files), **totals}, sort_keys=True))
-    for module, stats in sorted(modules.items()):
-        annotation("notice", label + " " + module, json.dumps(stats, sort_keys=True))
+    # GitHub limits notices per step. Keep room for real Android/device results later
+    # in this same (already authorized) workflow step.
+    if modules:
+        annotation("notice", label + " modules", json.dumps(dict(sorted(modules.items())), sort_keys=True))
     for error in malformed:
         annotation("error", label + " report unreadable", error)
     for failure in failed_cases[:15]:

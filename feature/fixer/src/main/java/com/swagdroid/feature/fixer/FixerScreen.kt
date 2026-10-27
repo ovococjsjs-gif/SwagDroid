@@ -419,7 +419,7 @@ private fun PlaybookDiagnosticCard(
                 ) {
                     Text(
                         text = item.verdict.labelRu,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp).testTag("verdict_${playbook.id}"),
                         style = MaterialTheme.typography.labelSmall,
                         color = verdictColor,
                     )
