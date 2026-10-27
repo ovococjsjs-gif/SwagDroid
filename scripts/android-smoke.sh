@@ -16,6 +16,13 @@ EMULATOR="$SDK/emulator/emulator"
 ADB="$SDK/platform-tools/adb"
 IMAGE="system-images;android-35;google_apis;x86_64"
 AVD="swagdroid-ci-api35"
+# New command-line tools and emulator builds may use different default AVD homes.
+# Give both an explicit disposable directory; never rely on ~/.android discovery.
+export ANDROID_USER_HOME="${RUNNER_TEMP:-/tmp}/swagdroid-android-home"
+export ANDROID_EMULATOR_HOME="$ANDROID_USER_HOME"
+export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+mkdir -p "$ANDROID_AVD_HOME"
+AVD_PATH="$ANDROID_AVD_HOME/$AVD.avd"
 SERIAL="emulator-5554"
 OUTPUT="$PWD/build/android-smoke"
 mkdir -p "$OUTPUT"
@@ -43,7 +50,7 @@ from pathlib import Path
 root=Path(sys.argv[1])
 # Log download hosts may be unavailable to reviewers; publish bounded diagnostic text
 # through the ordinary check annotations instead of reporting only a generic timeout.
-for name in ("emulator.log", "emulator-version.txt", "acceleration.txt", "crash-logcat.txt", "avd.log", "host-packages.log", "sdk-install.log", "tests.log"):
+for name in ("emulator.log", "emulator-version.txt", "acceleration.txt", "crash-logcat.txt", "avd.log", "avd-list.txt", "host-packages.log", "sdk-install.log", "tests.log"):
     path=root/name
     if not path.exists(): continue
     text="\n".join(path.read_text(errors="replace").splitlines()[-40:])[-3200:]
@@ -106,7 +113,13 @@ PYENV
 "$ADB" start-server >/dev/null
 # connectedAndroidTest discovers devices. Refuse to run if anything is already connected.
 [[ -z "$("$ADB" devices | awk 'NR>1 && NF {print $1}')" ]] || fail "Runner already has an ADB device; refusing to touch it"
-printf 'no\n' | "$AVDMANAGER" create avd --force --name "$AVD" --package "$IMAGE" --device pixel_5 > "$OUTPUT/avd.log" 2>&1
+printf 'no\n' | "$AVDMANAGER" create avd --force --name "$AVD" --package "$IMAGE" --device pixel_5 --path "$AVD_PATH" > "$OUTPUT/avd.log" 2>&1
+[[ -s "$AVD_PATH/config.ini" ]] || fail "avdmanager did not create the requested AVD configuration"
+# This is the standard AVD index, pointing only to the real avdmanager-produced config.
+printf 'avd.ini.encoding=UTF-8\npath=%s\ntarget=android-35\n' "$AVD_PATH" > "$ANDROID_AVD_HOME/$AVD.ini"
+"$EMULATOR" -list-avds > "$OUTPUT/avd-list.txt" 2>&1
+grep -Fxq "$AVD" "$OUTPUT/avd-list.txt" || fail "The emulator cannot discover its explicitly created AVD"
+echo "::notice title=Android AVD::Real API 35 AVD configuration created and discovered in the explicit CI-only directory."
 
 "$EMULATOR" -avd "$AVD" -port 5554 -no-window -noaudio -no-snapshot -no-boot-anim \
   -gpu swiftshader_indirect -memory 2048 -cores 2 -camera-back none -camera-front none \
