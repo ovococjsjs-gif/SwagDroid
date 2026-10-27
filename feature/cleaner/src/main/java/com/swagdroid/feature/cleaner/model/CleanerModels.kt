@@ -3,6 +3,7 @@ package com.swagdroid.feature.cleaner.model
 import com.swagdroid.core.model.RiskLevel
 
 enum class CleanerSubTab(val titleRu: String) {
+    SHARED_FILES("Общие файлы"),
     SYSTEM_CACHE("Кэш и Мусор"),
     MESSENGERS("Мессенджеры"),
     CORPSES("Хвосты APK"),

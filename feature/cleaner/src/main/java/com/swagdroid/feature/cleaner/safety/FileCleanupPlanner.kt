@@ -14,7 +14,6 @@ import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.Path
 import java.nio.file.attribute.BasicFileAttributes
-import java.security.MessageDigest
 import java.util.UUID
 
 /**
@@ -32,8 +31,8 @@ class FileCleanupPlanner(
     private val maxDepth: Int = 32,
     private val deleteFile: (Path) -> Unit = { Files.delete(it) },
 ) {
-    private val logicalRoot = storageRoot.toPath().toAbsolutePath().normalize()
-    private val root = storageRoot.canonicalFile.toPath()
+    private val boundary = SharedStorageBoundary(storageRoot, isPathAllowed)
+    private val root = boundary.root
 
     fun prepare(selection: CleanupSelection): PreparedCleanupPlan {
         require(Files.isDirectory(root, NOFOLLOW_LINKS)) { "Хранилище недоступно. Проверьте разрешение и повторите сканирование." }
@@ -58,6 +57,10 @@ class FileCleanupPlanner(
             val originalSnapshot = originalSnapshots.getOrPut(original) {
                 capture(original).also {
                     require(!it.isEmptyDirectory) { "Оригинал дубликата больше не является файлом: $originalPath" }
+                    if (selection.requireExactTargets) require(selection.expectedFiles.containsKey(original.toString())) { "Нет снимка сохраняемого оригинала. Нужно новое сканирование." }
+                    selection.expectedFiles[original.toString()]?.let { expected ->
+                        require(CleanupFileReader.matchesExpected(it, expected)) { "Оригинал изменился после поиска. Повторите сканирование: $originalPath" }
+                    }
                 }
             }
             group.paths.forEach copyLoop@ { copyPath ->
@@ -81,10 +84,23 @@ class FileCleanupPlanner(
             }
             try {
                 val attrs = Files.readAttributes(path, BasicFileAttributes::class.java, NOFOLLOW_LINKS)
+                val expected = selection.expectedFiles[path.toString()]
+                if (selection.requireExactTargets && expected == null) {
+                    exclude(path.toString(), "Объект не входил в просмотренный список")
+                    return
+                }
+                if (expected != null && !CleanupFileReader.matchesExpected(CleanupFileReader.metadata(path, attrs), expected.copy(sha256 = null))) {
+                    exclude(path.toString(), "Объект изменился после поиска; нужно новое сканирование")
+                    return
+                }
                 if (attrs.isDirectory) {
                     val children = path.toFile().listFiles()
                         ?: throw IOException("Не удалось прочитать содержимое папки")
                     if (children.isNotEmpty()) {
+                        if (selection.requireExactTargets || expected != null) {
+                            exclude(path.toString(), "Выбранная пустая папка больше не пуста. Новые файлы не включены в план.")
+                            return
+                        }
                         children.sortedBy { it.name }.forEach { visit(it.toPath(), source, depth + 1) }
                         return
                     }
@@ -95,6 +111,10 @@ class FileCleanupPlanner(
                     return
                 }
                 val snapshot = capture(path)
+                if (expected != null && !CleanupFileReader.matchesExpected(snapshot, expected)) {
+                    exclude(path.toString(), "Содержимое изменилось после поиска; нужно новое сканирование")
+                    return
+                }
                 val exactOriginals = exactOriginalsByCopy[path].orEmpty()
                 if (exactOriginals.any { snapshot.sha256 == null || it.sha256 != snapshot.sha256 }) {
                     exclude(path.toString(), "Файл больше не совпадает с оригиналом. Нужно новое сканирование.")
@@ -177,59 +197,7 @@ class FileCleanupPlanner(
         false
     }
 
-    private fun capture(path: Path): CleanupFileSnapshot {
-        checkCancellation()
-        if (!isSafePath(path)) throw IOException("Путь защищён или содержит символическую ссылку")
-        val before = Files.readAttributes(path, BasicFileAttributes::class.java, NOFOLLOW_LINKS)
-        if (before.isDirectory) {
-            if (path.toFile().list()?.isEmpty() != true) throw IOException("Папка больше не пуста")
-            return CleanupFileSnapshot(path.toString(), 0, before.lastModifiedTime().toMillis(), null, true, before.fileKey()?.toString())
-        }
-        if (!before.isRegularFile) throw IOException("Не обычный файл")
-        val digest = MessageDigest.getInstance("SHA-256")
-        Files.newInputStream(path, NOFOLLOW_LINKS).use { input ->
-            val buffer = ByteArray(64 * 1024)
-            while (true) {
-                checkCancellation()
-                val count = input.read(buffer)
-                if (count < 0) break
-                digest.update(buffer, 0, count)
-            }
-        }
-        val after = Files.readAttributes(path, BasicFileAttributes::class.java, NOFOLLOW_LINKS)
-        if (!after.isRegularFile || before.size() != after.size() ||
-            before.lastModifiedTime() != after.lastModifiedTime() || before.fileKey() != after.fileKey() || !isSafePath(path)
-        ) {
-            throw IOException("Файл изменился во время подготовки или проверки")
-        }
-        return CleanupFileSnapshot(
-            path.toString(), before.size(), before.lastModifiedTime().toMillis(),
-            digest.digest().joinToString("") { "%02x".format(it) },
-            fileKey = before.fileKey()?.toString(),
-        )
-    }
-
-    private fun resolveInsideRoot(raw: String): Path? {
-        val file = File(raw)
-        if (!file.isAbsolute) return null
-        val input = file.toPath().normalize()
-        val relative = when {
-            input.startsWith(logicalRoot) -> logicalRoot.relativize(input)
-            input.startsWith(root) -> root.relativize(input)
-            else -> return null
-        }
-        val path = root.resolve(relative).normalize()
-        // Never accept the entire storage root, or a sibling with the same string prefix.
-        return path.takeIf { it != root && it.startsWith(root) }
-    }
-
-    private fun isSafePath(path: Path): Boolean {
-        if (path == root || !path.startsWith(root) || Files.isSymbolicLink(root) || !isPathAllowed(path.toString())) return false
-        var current = root
-        for (segment in root.relativize(path)) {
-            current = current.resolve(segment)
-            if (Files.isSymbolicLink(current)) return false
-        }
-        return true
-    }
+    private fun capture(path: Path): CleanupFileSnapshot = CleanupFileReader.capture(path, boundary, checkCancellation)
+    private fun resolveInsideRoot(raw: String): Path? = boundary.resolve(raw)
+    private fun isSafePath(path: Path): Boolean = boundary.allows(path)
 }

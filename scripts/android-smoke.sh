@@ -235,9 +235,9 @@ if ! timeout 600 "$ADB" -s "$SERIAL" shell am instrument -w -r -e debug false   
 if ! python3 scripts/instrumentation-to-junit.py --input "$OUTPUT/instrumentation-vault.txt"   --output core/vault/build/outputs/androidTest-results/adb-smoke/TEST-VaultMigrationInstrumentedTest.xml   --class-name com.swagdroid.core.vault.VaultMigrationInstrumentedTest --min-tests 4; then failed=1; fi
 
 if ! timeout 600 "$ADB" -s "$SERIAL" shell am instrument -w -r -e debug false   -e class com.swagdroid.BasicSmokeTest   "$(cat "$OUTPUT/app-runner.txt")" > "$OUTPUT/instrumentation-app.txt" 2>&1; then failed=1; fi
-if ! python3 scripts/instrumentation-to-junit.py --input "$OUTPUT/instrumentation-app.txt"   --output app/build/outputs/androidTest-results/adb-smoke/TEST-BasicSmokeTest.xml   --class-name com.swagdroid.BasicSmokeTest --min-tests 4; then failed=1; fi
+if ! python3 scripts/instrumentation-to-junit.py --input "$OUTPUT/instrumentation-app.txt"   --output app/build/outputs/androidTest-results/adb-smoke/TEST-BasicSmokeTest.xml   --class-name com.swagdroid.BasicSmokeTest --min-tests 8; then failed=1; fi
 
-if ! python3 scripts/summarize-junit.py --kind android --android-source adb-smoke --min-tests 8   --require-module app --require-module core:vault --fail-on-skip; then failed=1; fi
+if ! python3 scripts/summarize-junit.py --kind android --android-source adb-smoke --min-tests 12   --require-module app --require-module core:vault --fail-on-skip; then failed=1; fi
 [[ "$failed" == 0 ]] || fail "Real Android instrumentation failed or was incomplete; no pass is inferred from compilation"
 
 "$ADB" -s "$SERIAL" exec-out run-as com.swagdroid.debug cat files/swag_last_crash.log > "$OUTPUT/app-crash.txt" 2>/dev/null || true
@@ -252,7 +252,7 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo '## Android smoke environment'
     echo '- Fresh Android 15 (API 35), x86_64 emulator with KVM.'
     echo '- Debug APK installed and cold-launched; Compose UI and real Android Room migration tests executed.'
-    echo '- Only synthetic files and an isolated test DB were used; no cleanup deletion was confirmed.'
+    echo '- Only synthetic files and an isolated test DB were used; deletion was confirmed solely for explicitly selected test fixtures.'
     echo '- This does not validate a physical phone, Shizuku/Root, or production signing.'
   } >> "$GITHUB_STEP_SUMMARY"
 fi

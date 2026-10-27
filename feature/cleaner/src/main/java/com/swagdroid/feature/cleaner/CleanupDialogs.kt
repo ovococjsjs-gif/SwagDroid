@@ -2,134 +2,103 @@ package com.swagdroid.feature.cleaner
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.swagdroid.core.designsystem.component.formatBytesRu
-import com.swagdroid.feature.cleaner.model.CleanupExecutionResult
-import com.swagdroid.feature.cleaner.model.PreparedCleanupPlan
+import com.swagdroid.feature.cleaner.model.CleanupCandidate
+import com.swagdroid.feature.cleaner.model.CleanupFileSnapshot
+import com.swagdroid.feature.cleaner.model.ScanCoverage
+import com.swagdroid.feature.cleaner.model.ScanLocationStatus
+import java.text.DateFormat
+import java.util.Date
+
+private fun supportsPreview(file: CleanupFileSnapshot): Boolean = !file.isEmptyDirectory && java.io.File(file.path).extension.lowercase() in setOf(
+    "jpg", "jpeg", "png", "webp", "heic", "heif", "gif", "mp4", "mkv", "webm", "3gp", "mp3", "aac", "m4a", "wav", "ogg", "opus", "amr", "pdf", "txt", "csv", "json", "log",
+)
+
+internal fun cleanupDate(timeMs: Long): String = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(timeMs))
 
 @Composable
-internal fun CleanupReviewDialog(
-    plan: PreparedCleanupPlan,
-    onDismiss: () -> Unit,
-    onConfirm: (String, Boolean) -> Unit,
-) {
-    var accepted by rememberSaveable(plan.id) { mutableStateOf(false) }
+internal fun CoverageDialog(coverage: ScanCoverage?, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("План безвозвратного удаления") },
+        title = { Text("Что удалось проверить") },
         text = {
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp).testTag("cleanup_plan_list"),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 item {
-                    Text(
-                        "Выбор из ВСЕХ разделов: ${plan.fileCount} файлов и ${plan.directoryCount} пустых папок. " +
-                            "Размер файлов: ${formatBytesRu(plan.fileBytes)} (без повторного учёта).",
-                    )
+                    Text("Только основное общее хранилище. Данные не отправляются в облако.")
+                    Text("Не включены Android/data, внутренние данные приложений, SD-карты, облако и другие профили. Root и Shizuku не расширяют доступ этого файлового сценария.", style = MaterialTheme.typography.bodySmall)
                 }
-                item {
-                    Text(
-                        "Корзины и отката нет. В списке могут быть сохранённые фото, видео и другие нужные файлы. " +
-                            "Наличие резервной копии не проверено.",
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-                item {
-                    Text(
-                        plan.sources.joinToString("\n") { "${it.tab.titleRu} · ${it.title}" }.ifEmpty { "Удалять нечего" },
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                }
-                items(plan.targets, key = { it.snapshot.path }) { target ->
-                    Column {
-                        Text(target.snapshot.path, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
-                        Text(
-                            if (target.snapshot.isEmptyDirectory) "Пустая папка" else formatBytesRu(target.snapshot.bytes),
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                        target.requiredOriginals.forEach {
-                            Text("Сохраняется оригинал: ${it.path}", style = MaterialTheme.typography.labelSmall)
+                if (coverage == null) {
+                    item { Text("Будут проверены Загрузки, Документы, Камера, Изображения, Видео, Музыка, Android/media и известные общие папки мессенджеров.") }
+                } else {
+                    items(coverage.locations) { location ->
+                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(location.title, style = MaterialTheme.typography.titleSmall)
+                            Text(location.relativePath, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
+                            Text(when (location.status) {
+                                ScanLocationStatus.CHECKED -> "Просмотрено файлов: ${location.inspectedFiles}"
+                                ScanLocationStatus.PARTIAL -> "Проверена только часть · файлов: ${location.inspectedFiles}"
+                                ScanLocationStatus.UNAVAILABLE -> "Не удалось прочитать — это не пустая папка"
+                                ScanLocationStatus.ABSENT -> "Папка не найдена"
+                                ScanLocationStatus.NOT_REACHED -> "Не проверена: сработал лимит поиска"
+                            }, style = MaterialTheme.typography.bodySmall)
+                            location.notes.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
                         }
                     }
-                }
-                if (plan.exclusions.isNotEmpty()) {
-                    item { Text("Исключено из плана: ${plan.exclusions.size}") }
-                    items(plan.exclusions) {
-                        Text("${it.path}\n${it.reason}", style = MaterialTheme.typography.bodySmall)
+                    item {
+                        Text("Исключено фильтром путей/ссылок: ${coverage.protectedEntries} объектов или папок.", style = MaterialTheme.typography.bodySmall)
+                        Text("По содержимому сравнили: ${coverage.duplicateFilesCompared}. Не сравнили в группах возможных копий: ${coverage.duplicateFilesNotCompared}.", style = MaterialTheme.typography.bodySmall)
                     }
+                    items(coverage.limits) { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
                 }
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().toggleable(
-                            value = accepted,
-                            enabled = plan.targets.isNotEmpty(),
-                            role = Role.Checkbox,
-                            onValueChange = { accepted = it },
-                        ),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Checkbox(checked = accepted, enabled = plan.targets.isNotEmpty(), onCheckedChange = null)
-                        Text(
-                            "Я проверил список и понимаю, что восстановление через SwagDroid невозможно.",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                }
+                item { Text("Фильтры известных важных данных — дополнительная защита, а не гарантия. Похожие фотографии не считаются точными копиями.", style = MaterialTheme.typography.bodySmall) }
             }
         },
-        confirmButton = {
-            Button(onClick = { onConfirm(plan.id, accepted) }, enabled = accepted && plan.targets.isNotEmpty(), modifier = Modifier.testTag("cleanup_confirm")) {
-                Text("Удалить безвозвратно")
-            }
-        },
-        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("cleanup_cancel")) { Text("Отмена") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Понятно") } },
     )
 }
 
 @Composable
-internal fun CleanupResultDialog(result: CleanupExecutionResult, onDismiss: () -> Unit) {
+internal fun CandidateDetailsDialog(candidate: CleanupCandidate, onDismiss: () -> Unit, onOpen: (CleanupFileSnapshot) -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Результат очистки") },
+        title = { Text(candidate.name) },
         text = {
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                item { Text(candidate.file.path, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)) }
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Удалено файлов: ${result.deletedFiles}. Пустых папок: ${result.deletedEmptyDirectories}.")
-                        Text("Размер удалённых файлов: ${formatBytesRu(result.deletedFileBytes)}. Это не замер свободного места.")
-                        Text("Пропущено: ${result.skipped.size}. Ошибок удаления: ${result.failed.size}.")
+                    Text(if (candidate.file.isEmptyDirectory) "Пустая папка" else "Размер: ${formatBytesRu(candidate.file.bytes)}")
+                    Text("Изменён: ${cleanupDate(candidate.file.modifiedAtMs)}", style = MaterialTheme.typography.bodySmall)
+                    Text("Раздел: ${candidate.locationTitle}", style = MaterialTheme.typography.bodySmall)
+                }
+                item { Text(candidate.bucket.explanation) }
+                candidate.keptOriginal?.let { original ->
+                    item {
+                        Text("Сохраняемый оригинал", style = MaterialTheme.typography.titleSmall)
+                        Text(original.path, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
+                        if (supportsPreview(original)) TextButton(onClick = { onOpen(original) }) { Text("Открыть оригинал") }
                     }
                 }
-                items(result.skipped) { Text("Не удалён: ${it.path}\n${it.reason}", style = MaterialTheme.typography.bodySmall) }
-                items(result.failed) { Text("Ошибка: ${it.path}\n${it.reason}", style = MaterialTheme.typography.bodySmall) }
+                item {
+                    Text("Открытие передаёт выбранный файл другому приложению с временным правом чтения. APK из этого экрана не запускаются.", style = MaterialTheme.typography.bodySmall)
+                }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Понятно") } },
+        confirmButton = {
+            if (supportsPreview(candidate.file)) TextButton(onClick = { onOpen(candidate.file) }) { Text("Открыть файл") }
+            else TextButton(onClick = onDismiss) { Text("Понятно") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } },
     )
 }

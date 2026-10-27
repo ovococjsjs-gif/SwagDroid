@@ -13,6 +13,8 @@ data class CleanupSelectionGroup(
 data class CleanupSelection(
     val groups: List<CleanupSelectionGroup>,
     val protectedOriginalPaths: Set<String>,
+    val expectedFiles: Map<String, CleanupFileSnapshot> = emptyMap(),
+    val requireExactTargets: Boolean = false,
 ) {
     companion object {
         fun from(
@@ -82,7 +84,17 @@ sealed interface CleanupReview {
     data object None : CleanupReview
     data class Awaiting(val plan: PreparedCleanupPlan) : CleanupReview
     class Approved internal constructor(private val plan: PreparedCleanupPlan) : CleanupReview {
+        val planId: String get() = plan.id
+        val targetCount: Int get() = plan.targets.size
         private var claimed = false
+        private var reserved = false
+
+        @Synchronized
+        internal fun reserveRun(): Boolean {
+            if (claimed || reserved) return false
+            reserved = true
+            return true
+        }
 
         /** A receipt authorizes one execution attempt, including an attempt that fails or is cancelled. */
         @Synchronized
