@@ -190,7 +190,7 @@ fun CleanerRoute(
                                 onClick = { viewModel.confirmCleanup(plan.id, permanentConsent) },
                                 enabled = permanentConsent && plan.targets.isNotEmpty() && state.access.canScan,
                                 modifier = Modifier.fillMaxWidth().testTag("cleanup_confirm"),
-                            ) { Text("Удалить ${plan.targets.size} объектов без корзины") }
+                            ) { Text("Удалить без корзины (${plan.targets.size})") }
                             TextButton(onClick = viewModel::editSelection, modifier = Modifier.fillMaxWidth().testTag("cleanup_cancel")) { Text("Изменить выбор / отменить") }
                         }
                         state.step == CleanupStep.RESULT -> {
@@ -281,7 +281,7 @@ fun CleanerRoute(
                             item {
                                 FlowCard(emphasized = true) {
                                     Text(if (scan.candidates.isEmpty()) "Кандидатов не найдено" else "Выберите, что больше не нужно", style = MaterialTheme.typography.titleLarge, modifier = Modifier.testTag("cleanup_results"))
-                                    Text("${scan.candidates.size} объектов · ${formatBytesRu(scan.fileBytes)}", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
+                                    Text("Объектов: ${scan.candidates.size} · ${formatBytesRu(scan.fileBytes)}", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
                                     Text("Размер найденных файлов, не обещание освободить столько места. Список не означает, что файлы лишние.", style = MaterialTheme.typography.bodySmall)
                                     Text("Поиск: ${cleanupDate(scan.scannedAtMs)}", style = MaterialTheme.typography.labelSmall)
                                 }
@@ -310,7 +310,7 @@ fun CleanerRoute(
                                 state.bucket?.let { Text(it.explanation, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp)) }
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     if (state.bucket in setOf(CleanupBucket.TEMPORARY, CleanupBucket.EMPTY_DIRECTORIES) && state.visibleCandidates.isNotEmpty()) {
-                                        TextButton(onClick = viewModel::selectFilteredFiles) { Text("Выбрать эти ${state.visibleCandidates.size}") }
+                                        TextButton(onClick = viewModel::selectFilteredFiles) { Text("Выбрать найденное (${state.visibleCandidates.size})") }
                                     }
                                     if (state.selectedPaths.isNotEmpty()) TextButton(onClick = viewModel::clearSelection) { Text("Снять весь выбор") }
                                 }
@@ -328,7 +328,7 @@ fun CleanerRoute(
                         item {
                             FlowCard(emphasized = true) {
                                 Text("Проверьте окончательный список", style = MaterialTheme.typography.titleLarge)
-                                Text("${plan.fileCount} файлов · ${plan.directoryCount} пустых папок", style = MaterialTheme.typography.titleMedium)
+                                Text("Файлов: ${plan.fileCount} · пустых папок: ${plan.directoryCount}", style = MaterialTheme.typography.titleMedium)
                                 Text(formatBytesRu(plan.fileBytes), style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold))
                                 Text("Выбор из всех фильтров. Каждый путь учитывается один раз.", style = MaterialTheme.typography.bodySmall)
                             }
