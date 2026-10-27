@@ -7,8 +7,11 @@ import android.os.Build
 import com.swagdroid.core.model.FeatureSource
 import com.swagdroid.core.model.PackageStateTarget
 import com.swagdroid.core.model.PrivilegeTier
+import com.swagdroid.core.model.StateReadException
 import com.swagdroid.core.model.SettingNamespace
 import com.swagdroid.core.privilege.PrivilegedCommandExecutor
+import com.swagdroid.core.privilege.SystemReadQuery
+import com.swagdroid.core.privilege.requireReadOutput
 import com.swagdroid.core.vault.StateVaultManager
 import com.swagdroid.core.vault.VaultMutationSpec
 import com.swagdroid.core.vault.VaultTransactionResult
@@ -16,6 +19,7 @@ import com.swagdroid.feature.fixer.model.AppRescueAuditResult
 import com.swagdroid.feature.fixer.model.DiagnosticVerdict
 import com.swagdroid.feature.fixer.model.FixPlaybook
 import com.swagdroid.feature.fixer.model.InstalledAppBrief
+import com.swagdroid.feature.fixer.safety.FixerSafetyPolicy
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -39,7 +43,13 @@ class FixerDiagnosticEngine @Inject constructor(
     /**
      * Runs a live, non-destructive diagnostic check for [playbook] on the current device.
      */
-    suspend fun diagnose(playbook: FixPlaybook): Pair<DiagnosticVerdict, String> = withContext(Dispatchers.IO) {
+    suspend fun diagnose(playbook: FixPlaybook): Pair<DiagnosticVerdict, String> = try {
+        diagnoseAvailableState(playbook)
+    } catch (error: StateReadException) {
+        DiagnosticVerdict.REVIEW_REQUIRED to "Данные недоступны: ${error.message}. Неисправность или её отсутствие не подтверждены."
+    }
+
+    private suspend fun diagnoseAvailableState(playbook: FixPlaybook): Pair<DiagnosticVerdict, String> = withContext(Dispatchers.IO) {
         val brand = "${Build.MANUFACTURER} ${Build.BRAND}".lowercase()
         if (playbook.vendorFilter.isNotEmpty() && playbook.vendorFilter.none { brand.contains(it) }) {
             return@withContext DiagnosticVerdict.NOT_APPLICABLE to
@@ -130,7 +140,7 @@ class FixerDiagnosticEngine @Inject constructor(
                 if (currentTier.ordinal < PrivilegeTier.ADB_SHIZUKU.ordinal) {
                     DiagnosticVerdict.NEEDS_PRIVILEGE to "Нужен ADB/Shizuku для чтения белого списка Doze транспорта FCM"
                 } else {
-                    val wl = executor.execute("dumpsys deviceidle whitelist").stdoutText
+                    val wl = executor.query(SystemReadQuery.Fixed.IDLE_WHITELIST).requireReadOutput().stdoutText
                     if (wl.contains("com.google.android.gms")) {
                         DiagnosticVerdict.HEALTHY to "Транспорт Google Play Services находится в белом списке Doze"
                     } else {
@@ -164,7 +174,7 @@ class FixerDiagnosticEngine @Inject constructor(
                 if (currentTier.ordinal < PrivilegeTier.ADB_SHIZUKU.ordinal) {
                     DiagnosticVerdict.NEEDS_PRIVILEGE to "Подключите ADB/Shizuku для проверки статуса Deep Doze и WakeLocks"
                 } else {
-                    val out = executor.execute("dumpsys deviceidle").stdoutText
+                    val out = executor.query(SystemReadQuery.Fixed.DEVICE_IDLE).requireReadOutput().stdoutText
                     val deepDisabled = out.contains("mDeepEnabled=false") || out.contains("Deep enabled: false")
                     if (deepDisabled) {
                         DiagnosticVerdict.ISSUE_FOUND to "Глубокий сон Android (Deep Doze) принудительно отключён!"
@@ -210,7 +220,7 @@ class FixerDiagnosticEngine @Inject constructor(
                 if (currentTier.ordinal < PrivilegeTier.ADB_SHIZUKU.ordinal) {
                     DiagnosticVerdict.NEEDS_PRIVILEGE to "Подключите ADB/Shizuku для немедленного запуска sm fstrim"
                 } else {
-                    val disk = executor.execute("dumpsys diskstats").stdoutText
+                    val disk = executor.query(SystemReadQuery.Fixed.DISK_STATS).requireReadOutput().stdoutText
                     val fstrimLine = disk.lineSequence().firstOrNull { it.contains("Last fstrim", ignoreCase = true) }?.trim()
                     DiagnosticVerdict.HEALTHY to (fstrimLine ?: "Чип UFS готов к ручному обслуживанию TRIM")
                 }
@@ -219,12 +229,16 @@ class FixerDiagnosticEngine @Inject constructor(
                 if (currentTier.ordinal < PrivilegeTier.ADB_SHIZUKU.ordinal) {
                     DiagnosticVerdict.NEEDS_PRIVILEGE to "Нужен ADB/Shizuku для аудита staging-сессий PackageInstaller"
                 } else {
-                    val out = executor.execute("pm list staging-sessions").stdoutText
-                    val ids = parseStagingSessionIds(out)
-                    if (ids.isNotEmpty()) {
-                        DiagnosticVerdict.ISSUE_FOUND to "Найдено зависших сессий установщика: ${ids.size} (${ids.joinToString()})"
+                    val result = executor.query(SystemReadQuery.Fixed.STAGING_SESSIONS).requireReadOutput()
+                    if (!result.isSuccess) {
+                        DiagnosticVerdict.REVIEW_REQUIRED to "Не удалось прочитать сессии установщика. Их состояние неизвестно."
                     } else {
-                        DiagnosticVerdict.HEALTHY to "Зависших staging-сессий установки не обнаружено"
+                        val ids = parseStagingSessionIds(result.stdoutText)
+                        if (ids.isNotEmpty()) {
+                            DiagnosticVerdict.REVIEW_REQUIRED to "Сессий установщика: ${ids.size} (${ids.joinToString()}). Это не доказывает, что они брошены; автоматическая отмена отключена."
+                        } else {
+                            DiagnosticVerdict.HEALTHY to "Команда не сообщила о staging-сессиях установки"
+                        }
                     }
                 }
             }
@@ -249,13 +263,17 @@ class FixerDiagnosticEngine @Inject constructor(
                 if (currentTier.ordinal < PrivilegeTier.ADB_SHIZUKU.ordinal) {
                     DiagnosticVerdict.NEEDS_PRIVILEGE to "Подключите ADB/Shizuku для поиска хвостов удалённых APK (-u)"
                 } else {
-                    val allWithUninstalled = executor.execute("pm list packages -u").stdoutText
-                    val activeOnly = executor.execute("pm list packages").stdoutText
-                    val ghosts = parseGhostUninstalledPackages(allWithUninstalled, activeOnly)
-                    if (ghosts.isNotEmpty()) {
-                        DiagnosticVerdict.ISSUE_FOUND to "Найдено пакетов-призраков (DELETE_KEEP_DATA): ${ghosts.size} — ${ghosts.take(3).joinToString()}"
+                    val allWithUninstalled = executor.query(SystemReadQuery.Packages(executor.currentUserId(), includeUninstalled = true)).requireReadOutput()
+                    val activeOnly = executor.query(SystemReadQuery.Packages(executor.currentUserId())).requireReadOutput()
+                    if (!allWithUninstalled.isSuccess || !activeOnly.isSuccess) {
+                        DiagnosticVerdict.REVIEW_REQUIRED to "Не удалось прочитать оба списка пакетов. Нельзя определить кандидатов."
                     } else {
-                        DiagnosticVerdict.HEALTHY to "Конфликтных хвостов удалённых приложений не найдено (0)"
+                        val candidates = parseGhostUninstalledPackages(allWithUninstalled.stdoutText, activeOnly.stdoutText)
+                        if (candidates.isNotEmpty()) {
+                            DiagnosticVerdict.REVIEW_REQUIRED to "Кандидатов для ручной проверки: ${candidates.size} — ${candidates.take(3).joinToString()}. Разность списков не доказывает конфликт; данные не удаляются."
+                        } else {
+                            DiagnosticVerdict.HEALTHY to "Различий в полученных списках пакетов нет; причина ошибки установки не установлена"
+                        }
                     }
                 }
             }
@@ -301,8 +319,8 @@ class FixerDiagnosticEngine @Inject constructor(
                 if (currentTier.ordinal < PrivilegeTier.ADB_SHIZUKU.ordinal) {
                     DiagnosticVerdict.NEEDS_PRIVILEGE to "Шрифт=$fontScale · Подключите ADB/Shizuku для проверки Override DPI и разрешения"
                 } else {
-                    val densityOut = executor.execute("wm density").stdoutText
-                    val sizeOut = executor.execute("wm size").stdoutText
+                    val densityOut = executor.query(SystemReadQuery.Fixed.DISPLAY_DENSITY).requireReadOutput().stdoutText
+                    val sizeOut = executor.query(SystemReadQuery.Fixed.DISPLAY_SIZE).requireReadOutput().stdoutText
                     val overDensity = parseWmOverride(densityOut)
                     val overSize = parseWmOverride(sizeOut)
                     if (overDensity != null || overSize != null || (fontScale != "1.0" && fontScale != "1")) {
@@ -381,7 +399,7 @@ class FixerDiagnosticEngine @Inject constructor(
                 if (currentTier.ordinal < PrivilegeTier.ADB_SHIZUKU.ordinal) {
                     DiagnosticVerdict.NEEDS_PRIVILEGE to "Подключите ADB/Shizuku для инспекции AudioMode в dumpsys audio"
                 } else {
-                    val audioOut = executor.execute("dumpsys audio").stdoutText
+                    val audioOut = executor.query(SystemReadQuery.Fixed.AUDIO).requireReadOutput().stdoutText
                     val stuckCall = audioOut.contains("MODE_IN_COMMUNICATION") || audioOut.contains("MODE_IN_CALL")
                     if (stuckCall) {
                         DiagnosticVerdict.ISSUE_FOUND to "Аудиосервер удерживает разговорный профиль MODE_IN_COMMUNICATION"
@@ -450,7 +468,7 @@ class FixerDiagnosticEngine @Inject constructor(
                 if (currentTier.ordinal < PrivilegeTier.ADB_SHIZUKU.ordinal) {
                     DiagnosticVerdict.NEEDS_PRIVILEGE to "Подключите ADB/Shizuku для сканирования AppOps MOCK_LOCATION"
                 } else {
-                    val out = executor.execute("appops query-op MOCK_LOCATION allow").stdoutText
+                    val out = executor.query(SystemReadQuery.MockLocations(executor.currentUserId())).requireReadOutput().stdoutText
                         .lineSequence().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("No ") }.toList()
                     if (out.isNotEmpty()) {
                         DiagnosticVerdict.ISSUE_FOUND to "Пакеты с активным правом подмены GPS: ${out.joinToString()}"
@@ -487,16 +505,16 @@ class FixerDiagnosticEngine @Inject constructor(
                 }
             }
             "sec_rogue_mitm_ca_audit" -> {
-                val userCaDir = File("/data/misc/user/0/cacerts-added")
-                val certs = userCaDir.listFiles()?.filter { it.isFile } ?: emptyList()
-                if (certs.isNotEmpty()) {
-                    DiagnosticVerdict.ISSUE_FOUND to "ВНИМАНИЕ: Установлено сторонних корневых сертификатов: ${certs.size} (${certs.joinToString { it.name }})"
+                val userCaDir = File("/data/misc/user/${executor.currentUserId()}/cacerts-added")
+                val certs = userCaDir.listFiles()?.filter { it.isFile }
+                DiagnosticVerdict.REVIEW_REQUIRED to if (certs == null) {
+                    "Каталог сертификатов недоступен процессу приложения. Проверьте пользовательские сертификаты в системных настройках. Отсутствие сертификатов не подтверждено."
                 } else {
-                    DiagnosticVerdict.HEALTHY to "Сторонних сертификатов перехвата HTTPS-трафика не обнаружено (0)"
+                    "Файлов в доступном каталоге CA: ${certs.size}. Наличие сертификата само по себе не доказывает перехват трафика; нужна ручная проверка."
                 }
             }
             "sec_open_adb_tcp_5555" -> {
-                val port = executor.execute("getprop service.adb.tcp.port").stdoutText.trim()
+                val port = executor.query(SystemReadQuery.Property("service.adb.tcp.port")).requireReadOutput().stdoutText.trim()
                 if (port.isNotEmpty() && port != "-1" && port != "0") {
                     DiagnosticVerdict.ISSUE_FOUND to "ОПАСНО: Открыт незащищённый сетевой порт ADB TCP $port!"
                 } else {
@@ -507,9 +525,9 @@ class FixerDiagnosticEngine @Inject constructor(
                 val enabled = executor.readSetting(SettingNamespace.SECURE, "enabled_accessibility_services")
                 if (!enabled.isNullOrBlank() && enabled != "null") {
                     val count = enabled.split(':').count { it.isNotBlank() }
-                    DiagnosticVerdict.ISSUE_FOUND to "Активно перехватчиков экрана в Спецвозможностях: $count ($enabled)"
+                    DiagnosticVerdict.REVIEW_REQUIRED to "Включено служб доступности: $count ($enabled). Это не признак неисправности. Автоматическое отключение запрещено."
                 } else {
-                    DiagnosticVerdict.HEALTHY to "Сторонних сервисов чтения экрана в Спецвозможностях нет"
+                    DiagnosticVerdict.REVIEW_REQUIRED to "Список служб не получен или пуст. Проверьте системные настройки; отсутствие служб не подтверждено."
                 }
             }
 
@@ -523,7 +541,7 @@ class FixerDiagnosticEngine @Inject constructor(
                 }
             }
             "perf_gpu_debug_overdraw_reset" -> {
-                val overdraw = executor.execute("getprop debug.hwui.overdraw").stdoutText.trim()
+                val overdraw = executor.query(SystemReadQuery.Property("debug.hwui.overdraw")).requireReadOutput().stdoutText.trim()
                 if (overdraw.isNotEmpty() && overdraw != "false") {
                     DiagnosticVerdict.ISSUE_FOUND to "Активен стресс-оверлей отладки GPU: debug.hwui.overdraw=$overdraw"
                 } else {
@@ -531,7 +549,7 @@ class FixerDiagnosticEngine @Inject constructor(
                 }
             }
             "perf_kernel_sched_vm_tune" -> {
-                val schedStats = executor.execute("cat /proc/sys/kernel/sched_schedstats").stdoutText.trim()
+                val schedStats = executor.query(SystemReadQuery.Fixed.SCHEDSTATS).requireReadOutput().stdoutText.trim()
                 if (schedStats == "0") {
                     DiagnosticVerdict.HEALTHY to "sched_schedstats=0 — накладные расходы статистики ядра уже сняты"
                 } else {
@@ -562,113 +580,54 @@ class FixerDiagnosticEngine @Inject constructor(
      * [StateVaultManager] whenever [FixPlaybook.supportsVaultRollback] is true.
      */
     suspend fun applyFix(playbook: FixPlaybook): FixExecutionOutcome = withContext(Dispatchers.IO) {
+        // Enforced below the UI, before even checking privileges or issuing any command.
+        FixerSafetyPolicy.automaticFixBlockReason(playbook.id)?.let { reason ->
+            return@withContext FixExecutionOutcome.Failed(reason)
+        }
         if (executor.currentTier().ordinal < playbook.requiredTier.ordinal) {
             return@withContext FixExecutionOutcome.Failed(
                 "Требуется уровень прав «${playbook.requiredTier.titleRu}». Откройте переключатель прав на Главной.",
             )
         }
 
-        when (playbook.id) {
-            // --- Non-vault pure maintenance actions ---
-            "net_soft_stack_reset" -> {
-                executor.execute("svc wifi disable && sleep 1 && svc wifi enable")
-                executor.execute("cmd connectivity airplane-mode enable && sleep 1 && cmd connectivity airplane-mode disable")
-                return@withContext FixExecutionOutcome.AppliedMaintenance(
-                    "Радиостек и DNS-кэш мягко перезапущены — все пароли Wi-Fi и пары Bluetooth сохранены!",
-                )
+        val maintenanceCommands = when (playbook.id) {
+            "net_soft_stack_reset" -> listOf(
+                "svc wifi disable && sleep 1 && svc wifi enable",
+                "cmd connectivity airplane-mode enable && sleep 1 && cmd connectivity airplane-mode disable",
+            )
+            "bat_mediascanner_cpu_loop" -> listOf("am force-stop com.android.providers.media.module", "am force-stop com.android.providers.media")
+            "bat_fuel_gauge_stats_reset" -> listOf("dumpsys batterystats --reset")
+            "stor_ufs_fstrim_lag" -> listOf("sm fstrim")
+            "stor_gallery_mediastore_desync" -> listOf("DCIM", "Pictures", "Download").map {
+                "am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/$it"
             }
-            "bat_mediascanner_cpu_loop" -> {
-                executor.execute("am force-stop com.android.providers.media.module")
-                executor.execute("am force-stop com.android.providers.media")
-                return@withContext FixExecutionOutcome.AppliedMaintenance(
-                    "Зацикленный процесс индексации мультимедиа перезапущен чисто.",
-                )
-            }
-            "bat_fuel_gauge_stats_reset" -> {
-                val res = executor.execute("dumpsys batterystats --reset")
-                return@withContext if (res.isSuccess) {
-                    FixExecutionOutcome.AppliedMaintenance("Статистика контроллера расхода (batterystats) успешно сброшена.")
-                } else {
-                    FixExecutionOutcome.Failed(res.stderrText.ifEmpty { "Не удалось сбросить batterystats" })
-                }
-            }
-            "stor_ufs_fstrim_lag" -> {
-                val res = executor.execute("sm fstrim")
-                return@withContext if (res.isSuccess) {
-                    FixExecutionOutcome.AppliedMaintenance("Команда TRIM (sm fstrim) выполнена для всех разделов UFS-памяти!")
-                } else {
-                    FixExecutionOutcome.Failed(res.stderrText.ifEmpty { "Команда sm fstrim завершилась с кодом ${res.exitCode}" })
-                }
-            }
-            "stor_abandoned_install_sessions" -> {
-                val ids = parseStagingSessionIds(executor.execute("pm list staging-sessions").stdoutText)
-                for (sessionId in ids) {
-                    executor.execute("pm install-abandon $sessionId")
-                }
-                return@withContext FixExecutionOutcome.AppliedMaintenance(
-                    "Очищено зависших сессий установщика: ${ids.size}.",
-                )
-            }
-            "stor_gallery_mediastore_desync" -> {
-                executor.execute("am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/DCIM")
-                executor.execute("am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Pictures")
-                executor.execute("am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Download")
-                return@withContext FixExecutionOutcome.AppliedMaintenance(
-                    "Запущена переиндексация папок DCIM, Pictures и Download в Галерее.",
-                )
-            }
-            "pkg_ghost_uninstalled_conflict" -> {
-                val ghosts = parseGhostUninstalledPackages(
-                    executor.execute("pm list packages -u").stdoutText,
-                    executor.execute("pm list packages").stdoutText,
-                )
-                var cleaned = 0
-                for (pkg in ghosts) {
-                    if (SAFE_PKG_REGEX.matches(pkg)) {
-                        if (executor.execute("cmd package uninstall $pkg").isSuccess) cleaned++
-                    }
-                }
-                return@withContext FixExecutionOutcome.AppliedMaintenance(
-                    "Удалено конфликтных пакетов-призраков (DELETE_KEEP_DATA): $cleaned из ${ghosts.size}. Теперь APK установятся без ошибки конфликта!",
-                )
-            }
-            "pkg_app_links_reverify" -> {
-                executor.execute("pm verify-app-links --re-verify")
-                return@withContext FixExecutionOutcome.AppliedMaintenance(
-                    "Запущена перепроверка открытия доменных ссылок во всех приложениях.",
-                )
-            }
-            "pkg_post_ota_art_compile" -> {
-                val res = executor.execute("cmd package bg-dexopt-job")
-                return@withContext if (res.isSuccess) {
-                    FixExecutionOutcome.AppliedMaintenance("Запущена профильная оптимизация байткода ART (bg-dexopt-job)!")
-                } else {
-                    FixExecutionOutcome.Failed(res.stderrText.ifEmpty { "Ошибка запуска bg-dexopt-job" })
-                }
-            }
-            "aud_stuck_call_routing" -> {
-                executor.execute("input keyevent 86") // KEYCODE_MEDIA_STOP
-                return@withContext FixExecutionOutcome.AppliedMaintenance(
-                    "Залипшая медиасессия остановлена, аудиофокус освобождён.",
-                )
-            }
-            "sec_rogue_mitm_ca_audit" -> {
-                val userCaDir = File("/data/misc/user/0/cacerts-added")
-                val certs = userCaDir.listFiles()?.filter { it.isFile } ?: emptyList()
-                return@withContext if (certs.isEmpty()) {
-                    FixExecutionOutcome.AppliedMaintenance("Проверено: сторонних корневых сертификатов прослушки в системе нет.")
-                } else {
-                    FixExecutionOutcome.Failed(
-                        "Найдены пользовательские CA (${certs.size} шт.). Удалите их вручную в Настройки → Безопасность → Шифрование и учётные данные → Доверенные сертификаты → Пользователь.",
+            "pkg_app_links_reverify" -> listOf("pm verify-app-links --re-verify")
+            "pkg_post_ota_art_compile" -> listOf("cmd package bg-dexopt-job")
+            "aud_stuck_call_routing" -> listOf("input keyevent 86")
+            else -> null
+        }
+        if (maintenanceCommands != null) {
+            var completed = 0
+            for (command in maintenanceCommands) {
+                val result = executor.execute(command)
+                if (!result.isSuccess) {
+                    return@withContext FixExecutionOutcome.Failed(
+                        "Обслуживание не завершено (команд завершено: $completed). " +
+                            result.stderrText.ifBlank { "Код ${result.exitCode}" } +
+                            ". Предыдущие команды могли изменить состояние; автоматического отката нет.",
                     )
                 }
+                completed++
             }
+            return@withContext FixExecutionOutcome.AppliedMaintenance(
+                "Команды обслуживания завершились без ошибки ($completed). Исправление исходного симптома не подтверждено; автоматического отката нет.",
+            )
         }
 
         // --- Vault-backed reversible fixes ---
         val mutations = buildVaultMutationsForPlaybook(playbook)
         if (mutations.isEmpty()) {
-            return@withContext FixExecutionOutcome.AppliedMaintenance("Все целевые пакеты/параметры уже в оптимальном состоянии.")
+            return@withContext FixExecutionOutcome.Failed("Нет доступных изменений по этому сценарию. Состояние не менялось; исправление проблемы не подтверждено.")
         }
 
         when (
@@ -681,7 +640,7 @@ class FixerDiagnosticEngine @Inject constructor(
         ) {
             is VaultTransactionResult.Success -> FixExecutionOutcome.AppliedWithVault(
                 snapshotId = tx.snapshotId,
-                messageRu = "Исправлено (${tx.appliedCount} опер.) · создана точка отката #${tx.snapshotId}",
+                messageRu = "Изменения записаны и проверены (${tx.appliedCount} опер.) · журнал #${tx.snapshotId}. Проверьте исходный симптом.",
             )
             is VaultTransactionResult.Failure -> FixExecutionOutcome.Failed(tx.errorMessage)
         }
@@ -780,8 +739,8 @@ class FixerDiagnosticEngine @Inject constructor(
                     .map { VaultMutationSpec.MutatePackageState(it, PackageStateTarget.ENABLED) }
             }
             "disp_broken_dpi_and_size" -> {
-                val prevDensity = parseWmOverride(executor.execute("wm density").stdoutText)
-                val prevSize = parseWmOverride(executor.execute("wm size").stdoutText)
+                val prevDensity = parseWmOverride(executor.query(SystemReadQuery.Fixed.DISPLAY_DENSITY).requireReadOutput().stdoutText)
+                val prevSize = parseWmOverride(executor.query(SystemReadQuery.Fixed.DISPLAY_SIZE).requireReadOutput().stdoutText)
                 buildList {
                     add(
                         VaultMutationSpec.MutateCustomShell(
@@ -852,7 +811,7 @@ class FixerDiagnosticEngine @Inject constructor(
                 VaultMutationSpec.MutateSetting(SettingNamespace.SECURE, "location_mode", "3"),
             )
             "gps_mock_location_antifraud" -> {
-                val pkgs = executor.execute("appops query-op MOCK_LOCATION allow").stdoutText
+                val pkgs = executor.query(SystemReadQuery.MockLocations(executor.currentUserId())).requireReadOutput().stdoutText
                     .lineSequence()
                     .map { it.trim() }
                     .filter { SAFE_PKG_REGEX.matches(it) }
@@ -871,7 +830,7 @@ class FixerDiagnosticEngine @Inject constructor(
                     .map { VaultMutationSpec.MutateAppOp(it, "READ_CLIPBOARD", "ignore") }
             }
             "sec_open_adb_tcp_5555" -> {
-                val rawPort = executor.execute("getprop service.adb.tcp.port").stdoutText.trim()
+                val rawPort = executor.query(SystemReadQuery.Property("service.adb.tcp.port")).requireReadOutput().stdoutText.trim()
                 val prev = rawPort.toIntOrNull()?.coerceIn(-1, 65535) ?: -1
                 listOf(
                     VaultMutationSpec.MutateCustomShell(
@@ -881,10 +840,6 @@ class FixerDiagnosticEngine @Inject constructor(
                     ),
                 )
             }
-            "sec_accessibility_scroll_stutter_audit" -> listOf(
-                VaultMutationSpec.MutateSetting(SettingNamespace.SECURE, "enabled_accessibility_services", ""),
-                VaultMutationSpec.MutateSetting(SettingNamespace.SECURE, "accessibility_enabled", "0"),
-            )
             "perf_cached_apps_freezer" -> listOf(
                 VaultMutationSpec.MutateSetting(SettingNamespace.GLOBAL, "cached_apps_freezer", "enabled"),
             )
@@ -896,9 +851,9 @@ class FixerDiagnosticEngine @Inject constructor(
                 ),
             )
             "perf_kernel_sched_vm_tune" -> {
-                val prevStats = executor.execute("cat /proc/sys/kernel/sched_schedstats").stdoutText.trim().toIntOrNull()?.coerceIn(0, 1) ?: 1
-                val prevDirty = executor.execute("cat /proc/sys/vm/dirty_ratio").stdoutText.trim().toIntOrNull()?.coerceIn(5, 90) ?: 20
-                val prevBgDirty = executor.execute("cat /proc/sys/vm/dirty_background_ratio").stdoutText.trim().toIntOrNull()?.coerceIn(1, 50) ?: 10
+                val prevStats = executor.query(SystemReadQuery.Fixed.SCHEDSTATS).requireReadOutput().stdoutText.trim().toIntOrNull()?.coerceIn(0, 1) ?: 1
+                val prevDirty = executor.query(SystemReadQuery.Fixed.DIRTY_RATIO).requireReadOutput().stdoutText.trim().toIntOrNull()?.coerceIn(5, 90) ?: 20
+                val prevBgDirty = executor.query(SystemReadQuery.Fixed.DIRTY_BACKGROUND_RATIO).requireReadOutput().stdoutText.trim().toIntOrNull()?.coerceIn(1, 50) ?: 10
                 listOf(
                     VaultMutationSpec.MutateCustomShell(
                         applyCommand = "echo 0 > /proc/sys/kernel/sched_schedstats",
@@ -953,9 +908,9 @@ class FixerDiagnosticEngine @Inject constructor(
 
     suspend fun inspectAppNotifications(app: InstalledAppBrief): AppRescueAuditResult = withContext(Dispatchers.IO) {
         val pkg = app.packageName
-        val whitelistOut = executor.execute("dumpsys deviceidle whitelist").stdoutText
+        val whitelistOut = executor.query(SystemReadQuery.Fixed.IDLE_WHITELIST).requireReadOutput().stdoutText
         val inWhitelist = whitelistOut.contains(pkg)
-        val bucketRaw = executor.execute("am get-standby-bucket $pkg").stdoutText.trim().ifEmpty { "active" }
+        val bucketRaw = executor.query(SystemReadQuery.StandbyBucket(executor.currentUserId(), pkg)).requireReadOutput().stdoutText.trim().ifEmpty { "active" }
         val runBg = executor.readAppOpMode(pkg, "RUN_IN_BACKGROUND")
         val runAnyBg = executor.readAppOpMode(pkg, "RUN_ANY_IN_BACKGROUND")
         val postNotif = executor.readAppOpMode(pkg, "POST_NOTIFICATION")

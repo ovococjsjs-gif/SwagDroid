@@ -6,7 +6,6 @@ import android.os.Build
 import com.swagdroid.core.model.FeatureSource
 import com.swagdroid.core.model.PrivilegeTier
 import com.swagdroid.core.model.SettingNamespace
-import com.swagdroid.core.privilege.DumpsysAndKernelParsers
 import com.swagdroid.core.privilege.PrivilegedCommandExecutor
 import com.swagdroid.core.vault.StateVaultManager
 import com.swagdroid.core.vault.VaultMutationSpec
@@ -68,7 +67,7 @@ class AdblockController @Inject constructor(
             if (!executor.currentTier().satisfies(PrivilegeTier.ADB_SHIZUKU)) {
                 return@withContext VaultTransactionResult.Failure(
                     "Режим 2 требует Беспроводной ADB / Shizuku или Root. Без них используйте Режим 1 (Локальный DNS-щит)!",
-                    autoReverted = true,
+
                 )
             }
             vaultManager.applyTransaction(
@@ -96,51 +95,10 @@ class AdblockController @Inject constructor(
     // Mode 3: Root Systemless /etc/hosts (Magisk / KernelSU / APatch)
     // =========================================================================
 
-    suspend fun applyRootSystemlessHosts(): VaultTransactionResult = withContext(Dispatchers.IO) {
-        if (executor.currentTier() != PrivilegeTier.ROOT) {
-            return@withContext VaultTransactionResult.Failure(
-                "Режим 3 (/etc/hosts) требует Root-доступ (Magisk / KernelSU / APatch).",
-                autoReverted = true,
-            )
-        }
-        blocklistRepo.ensureLoaded()
-        val stagingFile = File(context.cacheDir, "swagdroid_generated_hosts")
-        val backupFile = File(context.filesDir, "swagdroid_hosts_backup.orig")
-        stagingFile.writeText(blocklistRepo.buildHostsFileContent(), Charsets.UTF_8)
-
-        // Prefer Magisk / KernelSU systemless hosts module path if present; otherwise create module overlay!
-        val magiskHostsPath = "/data/adb/modules/hosts/system/etc/hosts"
-        val checkMagisk = executor.execute("[ -d /data/adb/modules ] && echo yes || echo no").stdoutText.trim()
-
-        val targetPath = if (checkMagisk == "yes") {
-            executor.execute(
-                "mkdir -p /data/adb/modules/hosts/system/etc && " +
-                    "printf 'id=hosts\\nname=SwagDroid Systemless Hosts\\nversion=v1\\nversionCode=1\\nauthor=SwagDroid\\ndescription=Systemless AdBlock hosts\\n' > /data/adb/modules/hosts/module.prop",
-            )
-            magiskHostsPath
-        } else {
-            "/system/etc/hosts"
-        }
-
-        val qStaging = DumpsysAndKernelParsers.shellQuote(stagingFile.absolutePath)
-        val qBackup = DumpsysAndKernelParsers.shellQuote(backupFile.absolutePath)
-        val qTarget = DumpsysAndKernelParsers.shellQuote(targetPath)
-
-        executor.execute("cp /system/etc/hosts $qBackup 2>/dev/null || true")
-
-        vaultManager.applyTransaction(
-            title = "Systemless AdBlock /etc/hosts (${blocklistRepo.totalRulesCount} прав.)",
-            reason = "Системная блокировка доменов через $targetPath",
-            source = FeatureSource.ADBLOCK,
-            mutations = listOf(
-                VaultMutationSpec.MutateCustomShell(
-                    applyCommand = "cp $qStaging $qTarget && chmod 644 $qTarget",
-                    revertCommand = "if [ -f $qBackup ]; then cp $qBackup $qTarget && chmod 644 $qTarget; fi",
-                    summaryRu = "Запись фильтрующего файла $targetPath",
-                ),
-            ),
+    suspend fun applyRootSystemlessHosts(): VaultTransactionResult =
+        VaultTransactionResult.Failure(
+            "Root hosts временно недоступен: нужны отдельный модуль, неизменяемый backup и проверка mount/отката. Файлы системы не изменялись.",
         )
-    }
 
     suspend fun readCurrentStatus(): Triple<Boolean, String?, Boolean> = withContext(Dispatchers.IO) {
         val dnsMode = executor.readSetting(SettingNamespace.GLOBAL, "private_dns_mode")
@@ -161,11 +119,11 @@ class AdblockController @Inject constructor(
         blockBackground: Boolean,
     ): VaultTransactionResult = withContext(Dispatchers.IO) {
         if (!Regex("^[a-zA-Z0-9._]+$").matches(packageName)) {
-            return@withContext VaultTransactionResult.Failure("Некорректное имя пакета", true)
+            return@withContext VaultTransactionResult.Failure("Некорректное имя пакета")
         }
         val uidStr = runCatching {
             context.packageManager.getApplicationInfo(packageName, 0).uid.toString()
-        }.getOrNull() ?: return@withContext VaultTransactionResult.Failure("Пакет не найден", true)
+        }.getOrNull() ?: return@withContext VaultTransactionResult.Failure("Пакет не найден")
 
         val applyCmd = if (blockBackground) {
             "cmd netpolicy add restrict-background-blacklist $uidStr"

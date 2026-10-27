@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Private app files/root paths are never exposed. The engine validates catalog membership,
+         canonical boundary, credential exclusions and unchanged metadata before granting one URI. -->
+    <external-path name="shared_preview" path="." />
+</paths>

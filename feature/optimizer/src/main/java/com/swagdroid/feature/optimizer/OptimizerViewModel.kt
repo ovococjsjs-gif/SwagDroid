@@ -23,6 +23,7 @@ import com.swagdroid.feature.optimizer.model.OptimizerSubTab
 import com.swagdroid.feature.optimizer.model.PrivateDnsPreset
 import com.swagdroid.feature.optimizer.model.RefreshRateProfile
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -47,6 +48,7 @@ data class OptimizerUiState(
     val debloatQuery: String = "",
     val exportedJsonPreview: String? = null,
     val showJsonSheet: Boolean = false,
+    val hasLiveState: Boolean = false,
     val isBusy: Boolean = false,
     val bannerMessage: String? = null,
 ) {
@@ -91,6 +93,7 @@ private data class InternalOptState(
     val debloatQuery: String = "",
     val exportedJsonPreview: String? = null,
     val showJsonSheet: Boolean = false,
+    val hasLiveState: Boolean = false,
     val isBusy: Boolean = false,
     val bannerMessage: String? = null,
 )
@@ -126,6 +129,7 @@ class OptimizerViewModel @Inject constructor(
             debloatQuery = st.debloatQuery,
             exportedJsonPreview = st.exportedJsonPreview,
             showJsonSheet = st.showJsonSheet,
+            hasLiveState = st.hasLiveState,
             isBusy = st.isBusy,
             bannerMessage = st.bannerMessage,
         )
@@ -148,14 +152,16 @@ class OptimizerViewModel @Inject constructor(
     }
 
     fun refreshAll() {
-        viewModelScope.launch {
-            internal.update { it.copy(isBusy = true) }
-            val liveTweaks = controller.readLiveTweaksState()
+        launchSafely {
+            internal.update { it.copy(isBusy = true, hasLiveState = false) }
             val debloat = uadRepo.scanInstalledAndCatalog()
             val userApps = controller.loadUserAppsForBooster()
+            internal.update { it.copy(allDebloatItems = debloat, boosterApps = userApps) }
+            val liveTweaks = controller.readLiveTweaksState()
             internal.update {
                 it.copy(
                     tweaks = liveTweaks,
+                    hasLiveState = true,
                     allDebloatItems = debloat,
                     boosterApps = userApps,
                     isBusy = false,
@@ -168,7 +174,7 @@ class OptimizerViewModel @Inject constructor(
 
     fun applyPreset(presetId: String) {
         val preset = internal.value.presets.firstOrNull { it.id == presetId } ?: return
-        viewModelScope.launch {
+        launchSafely {
             internal.update { it.copy(isBusy = true) }
             when (val res = controller.applyPreset(preset)) {
                 is VaultTransactionResult.Success -> {
@@ -177,6 +183,7 @@ class OptimizerViewModel @Inject constructor(
                         cur.copy(
                             isBusy = false,
                             tweaks = freshTweaks,
+                            hasLiveState = true,
                             presets = cur.presets.map {
                                 if (it.id == presetId) it.copy(activeSnapshotId = res.snapshotId) else it
                             },
@@ -192,7 +199,7 @@ class OptimizerViewModel @Inject constructor(
     }
 
     fun rollbackPreset(presetId: String, snapshotId: Long) {
-        viewModelScope.launch {
+        launchSafely {
             internal.update { it.copy(isBusy = true) }
             when (val res = vaultManager.rollbackSnapshot(snapshotId)) {
                 is VaultTransactionResult.Success -> {
@@ -201,6 +208,7 @@ class OptimizerViewModel @Inject constructor(
                         cur.copy(
                             isBusy = false,
                             tweaks = freshTweaks,
+                            hasLiveState = true,
                             presets = cur.presets.map {
                                 if (it.id == presetId) it.copy(activeSnapshotId = null) else it
                             },
@@ -219,7 +227,7 @@ class OptimizerViewModel @Inject constructor(
         val suspendedIds = internal.value.allDebloatItems
             .filter { it.isInstalledOnDevice && it.stateTarget != PackageStateTarget.ENABLED }
             .map { it.entry.id }
-        val json = controller.exportPortableProfileJson(internal.value.tweaks, suspendedIds)
+        val json = if (internal.value.hasLiveState) controller.exportPortableProfileJson(internal.value.tweaks, suspendedIds) else null
         internal.update { it.copy(exportedJsonPreview = json, showJsonSheet = true) }
     }
 
@@ -228,7 +236,7 @@ class OptimizerViewModel @Inject constructor(
     }
 
     fun importPortableJson(rawJson: String) {
-        viewModelScope.launch {
+        launchSafely {
             internal.update { it.copy(isBusy = true, showJsonSheet = false) }
             when (val res = controller.importPortableProfileJson(rawJson)) {
                 is VaultTransactionResult.Success -> {
@@ -238,6 +246,7 @@ class OptimizerViewModel @Inject constructor(
                         it.copy(
                             isBusy = false,
                             tweaks = freshTweaks,
+                            hasLiveState = true,
                             allDebloatItems = freshDebloat,
                             bannerMessage = "JSON-профиль применён (${res.appliedCount} опер.) · точка отката #${res.snapshotId}",
                         )
@@ -323,7 +332,7 @@ class OptimizerViewModel @Inject constructor(
 
     fun runGlobalArtBooster() {
         val mode = internal.value.selectedArtMode
-        viewModelScope.launch {
+        launchSafely {
             internal.update { it.copy(isBusy = true) }
             val summary = controller.runGlobalArtCompileAndTrim(mode)
             internal.update { it.copy(isBusy = false, bannerMessage = summary) }
@@ -332,7 +341,7 @@ class OptimizerViewModel @Inject constructor(
 
     fun compileSingleApp(pkg: String) {
         val mode = internal.value.selectedArtMode
-        viewModelScope.launch {
+        launchSafely {
             internal.update { it.copy(isBusy = true) }
             val msg = controller.compileSingleApp(pkg, mode)
             internal.update { it.copy(isBusy = false, bannerMessage = msg) }
@@ -431,7 +440,7 @@ class OptimizerViewModel @Inject constructor(
         target: PackageStateTarget,
         titleRu: String,
     ) {
-        viewModelScope.launch {
+        launchSafely {
             internal.update { it.copy(isBusy = true) }
             when (val res = controller.mutateDebloatPackages(packageIds, target, titleRu)) {
                 is VaultTransactionResult.Success -> {
@@ -455,7 +464,7 @@ class OptimizerViewModel @Inject constructor(
         labelRu: String,
         block: suspend () -> VaultTransactionResult,
     ) {
-        viewModelScope.launch {
+        launchSafely {
             internal.update { it.copy(isBusy = true) }
             when (val res = block()) {
                 is VaultTransactionResult.Success -> {
@@ -464,6 +473,7 @@ class OptimizerViewModel @Inject constructor(
                         it.copy(
                             isBusy = false,
                             tweaks = freshTweaks,
+                            hasLiveState = true,
                             bannerMessage = "$labelRu сохранено (точка отката #${res.snapshotId})",
                         )
                     }
@@ -474,4 +484,15 @@ class OptimizerViewModel @Inject constructor(
             }
         }
     }
+    private fun launchSafely(action: suspend () -> Unit) = viewModelScope.launch {
+        try {
+            action()
+        } catch (cancelled: CancellationException) {
+            internal.update { it.copy(isBusy = false, hasLiveState = false) }
+            throw cancelled
+        } catch (error: Exception) {
+            internal.update { it.copy(isBusy = false, hasLiveState = false, bannerMessage = "Операция или чтение состояния не подтверждены: ${error.message}. Проверьте историю StateVault.") }
+        }
+    }
+
 }

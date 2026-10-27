@@ -2,8 +2,11 @@ package com.swagdroid.core.vault.di
 
 import android.content.Context
 import androidx.room.Room
+import com.swagdroid.core.vault.JsonVaultExporter
+import com.swagdroid.core.vault.VaultExporter
 import com.swagdroid.core.vault.RoomVaultStore
 import com.swagdroid.core.vault.VaultStore
+import com.swagdroid.core.vault.db.MIGRATION_1_2
 import com.swagdroid.core.vault.db.SnapshotDao
 import com.swagdroid.core.vault.db.SwagVaultDatabase
 import dagger.Binds
@@ -22,6 +25,9 @@ abstract class VaultBindingModule {
     @Binds
     @Singleton
     abstract fun bindVaultStore(impl: RoomVaultStore): VaultStore
+
+    @Binds
+    abstract fun bindVaultExporter(impl: JsonVaultExporter): VaultExporter
 }
 
 @Module
@@ -45,7 +51,7 @@ object VaultDatabaseModule {
         context,
         SwagVaultDatabase::class.java,
         "swagdroid_vault.db",
-    ).fallbackToDestructiveMigration(true).build()
+    ).addMigrations(MIGRATION_1_2).build()
 
     @Provides
     @Singleton

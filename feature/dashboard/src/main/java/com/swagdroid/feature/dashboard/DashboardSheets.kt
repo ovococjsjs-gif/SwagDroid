@@ -330,7 +330,7 @@ fun StateVaultHistorySheet(
                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
             )
             Text(
-                text = "Каждое изменение системы в SwagDroid предварительно сохраняет точные старые значения параметров. Вы можете откатить любой фикс по отдельности или вернуть всё сразу.",
+                text = "Для поддерживаемых изменений сохраняются исходные значения и журнал шагов. Откат проверяется чтением; при конфликте, неизвестном завершении команды или повреждённой записи система не перезаписывается вслепую.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -344,7 +344,7 @@ fun StateVaultHistorySheet(
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
                 ) {
-                    Text("Слепок")
+                    Text("Снимок")
                 }
                 OutlinedButton(
                     onClick = onExportJson,
@@ -353,14 +353,14 @@ fun StateVaultHistorySheet(
                 ) {
                     Text("Экспорт JSON")
                 }
-                if (snapshots.any { it.status == SnapshotStatus.ACTIVE }) {
+                if (snapshots.any { it.status.canAttemptRollback }) {
                     Button(
                         onClick = onRollbackAll,
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(containerColor = StatusDanger),
                         shape = RoundedCornerShape(12.dp),
                     ) {
-                        Text("Сброс всех")
+                        Text("Откатить доступные")
                     }
                 }
             }
@@ -379,11 +379,11 @@ fun StateVaultHistorySheet(
                 }
             } else {
                 snapshots.forEach { snap ->
-                    val isActive = snap.status == SnapshotStatus.ACTIVE
-                    val badgeColor = when (snap.status) {
-                        SnapshotStatus.ACTIVE -> StatusSafe
-                        SnapshotStatus.ROLLED_BACK -> MaterialTheme.colorScheme.onSurfaceVariant
-                        SnapshotStatus.FAILED -> StatusDanger
+                    val canRestore = snap.status.canAttemptRollback
+                    val badgeColor = when {
+                        snap.status == SnapshotStatus.ACTIVE -> StatusSafe
+                        snap.status in setOf(SnapshotStatus.ROLLED_BACK, SnapshotStatus.CHECKPOINT) -> MaterialTheme.colorScheme.onSurfaceVariant
+                        else -> StatusDanger
                     }
                     Surface(
                         shape = RoundedCornerShape(16.dp),
@@ -436,12 +436,16 @@ fun StateVaultHistorySheet(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
-                            if (isActive) {
+                            snap.lastError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = StatusDanger) }
+                            if (snap.steps.isNotEmpty()) {
+                                Text("Шаги: ${snap.steps.joinToString { "${it.index + 1}:${it.status.name}" }}", style = MaterialTheme.typography.labelSmall)
+                            }
+                            if (canRestore) {
                                 OutlinedButton(
                                     onClick = { onRollbackSingle(snap.id) },
                                     shape = RoundedCornerShape(10.dp),
                                 ) {
-                                    Text("Вернуть как было (Откат)")
+                                    Text("Проверить и восстановить")
                                 }
                             }
                         }

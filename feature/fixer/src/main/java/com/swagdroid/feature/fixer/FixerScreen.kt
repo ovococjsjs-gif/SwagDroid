@@ -1,5 +1,8 @@
 package com.swagdroid.feature.fixer
 
+import android.content.Intent
+import android.provider.Settings
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -37,6 +40,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -55,6 +60,7 @@ import com.swagdroid.feature.fixer.model.DiagnosticVerdict
 import com.swagdroid.feature.fixer.model.InstalledAppBrief
 import com.swagdroid.feature.fixer.model.PhoneSubsystem
 import com.swagdroid.feature.fixer.model.PlaybookRuntimeState
+import com.swagdroid.feature.fixer.safety.FixerSafetyPolicy
 
 @Composable
 fun FixerRoute(
@@ -104,7 +110,7 @@ fun FixerScreen(
     onDismissBanner: () -> Unit,
 ) {
     LazyColumn(
-        modifier = Modifier
+        modifier = Modifier.testTag("fixer_list")
             .fillMaxSize()
             .padding(contentPadding),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
@@ -260,7 +266,7 @@ fun FixerScreen(
                 OutlinedTextField(
                     value = state.searchQuery,
                     onValueChange = onSearchChange,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().testTag("fixer_search"),
                     singleLine = true,
                     shape = RoundedCornerShape(16.dp),
                     leadingIcon = {
@@ -381,10 +387,12 @@ private fun PlaybookDiagnosticCard(
 ) {
     var expanded by rememberSaveable(item.playbook.id) { mutableStateOf(false) }
     val playbook = item.playbook
+    val blockedReason = FixerSafetyPolicy.automaticFixBlockReason(playbook.id)
+    val context = LocalContext.current
 
     val verdictColor = when (item.verdict) {
         DiagnosticVerdict.HEALTHY -> StatusSafe
-        DiagnosticVerdict.ISSUE_FOUND -> StatusWarning
+        DiagnosticVerdict.ISSUE_FOUND, DiagnosticVerdict.REVIEW_REQUIRED -> StatusWarning
         DiagnosticVerdict.FIXED_ACTIVE -> TierAdbColor
         DiagnosticVerdict.NEEDS_PRIVILEGE -> StatusDanger
         DiagnosticVerdict.CHECKING -> TierAdbColor
@@ -411,7 +419,7 @@ private fun PlaybookDiagnosticCard(
                 ) {
                     Text(
                         text = item.verdict.labelRu,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp).testTag("verdict_${playbook.id}"),
                         style = MaterialTheme.typography.labelSmall,
                         color = verdictColor,
                     )
@@ -445,21 +453,38 @@ private fun PlaybookDiagnosticCard(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Text(
-                    text = "Причина в системе: ${playbook.rootCauseExplanation}",
+                    text = "Что известно: ${playbook.rootCauseExplanation}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    text = "Что сделает фикс: ${playbook.fixActionSummary}",
+                    text = "Действие: ${playbook.fixActionSummary}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Text(
-                    text = "Требуемый уровень: ${playbook.requiredTier.titleRu} · " +
-                        if (playbook.supportsVaultRollback) "Поддерживает авто-откат StateVault" else "Разовое обслуживание без мутации настроек",
+                    text = "Требуемый уровень: ${playbook.requiredTier.titleRu} · " + when {
+                        blockedReason != null -> "Только проверка, без автоматических изменений"
+                        playbook.supportsVaultRollback -> "Изменения записываются в StateVault"
+                        else -> "Действие без автоматического отката"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
+            }
+        }
+
+        blockedReason?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (playbook.id in setOf(FixerSafetyPolicy.ACCESSIBILITY_SERVICES, FixerSafetyPolicy.USER_CERTIFICATES)) {
+                val accessibility = playbook.id == FixerSafetyPolicy.ACCESSIBILITY_SERVICES
+                OutlinedButton(onClick = {
+                    val action = if (accessibility) Settings.ACTION_ACCESSIBILITY_SETTINGS else Settings.ACTION_SECURITY_SETTINGS
+                    runCatching { context.startActivity(Intent(action)) }
+                        .onFailure { Toast.makeText(context, "Откройте соответствующий раздел настроек телефона вручную", Toast.LENGTH_LONG).show() }
+                }) {
+                    Text(if (accessibility) "Открыть спецвозможности" else "Открыть настройки безопасности")
+                }
             }
         }
 
@@ -472,6 +497,7 @@ private fun PlaybookDiagnosticCard(
             OutlinedButton(
                 onClick = onDiagnose,
                 enabled = !item.isBusy,
+                modifier = Modifier.testTag("diagnose_${playbook.id}"),
             ) {
                 Text("Проверить")
             }
@@ -489,12 +515,12 @@ private fun PlaybookDiagnosticCard(
             } else {
                 Button(
                     onClick = onFix,
-                    enabled = !item.isBusy && item.verdict != DiagnosticVerdict.NOT_APPLICABLE,
-                    modifier = Modifier.weight(1f),
+                    enabled = !item.isBusy && blockedReason == null && item.verdict != DiagnosticVerdict.NOT_APPLICABLE,
+                    modifier = Modifier.weight(1f).testTag("fix_${playbook.id}"),
                 ) {
                     Icon(SwagIcons.Fixer, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.size(6.dp))
-                    Text(if (playbook.supportsVaultRollback) "Исправить" else "Выполнить")
+                    Text(if (blockedReason != null) "Только проверка" else if (playbook.supportsVaultRollback) "Исправить" else "Выполнить")
                 }
             }
         }

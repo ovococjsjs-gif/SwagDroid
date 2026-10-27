@@ -14,7 +14,9 @@ import com.swagdroid.feature.fixer.model.DiagnosticVerdict
 import com.swagdroid.feature.fixer.model.InstalledAppBrief
 import com.swagdroid.feature.fixer.model.PhoneSubsystem
 import com.swagdroid.feature.fixer.model.PlaybookRuntimeState
+import com.swagdroid.feature.fixer.safety.FixerSafetyPolicy
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -125,7 +127,7 @@ class FixerViewModel @Inject constructor(
 
     fun runFullDiagnostics() {
         if (internal.value.isFullScanRunning) return
-        viewModelScope.launch {
+        launchSafely {
             val all = FixerCatalog.allPlaybooks
             internal.update {
                 it.copy(
@@ -135,9 +137,11 @@ class FixerViewModel @Inject constructor(
                 )
             }
             var foundIssues = 0
+            var manualReviews = 0
             all.forEachIndexed { idx, playbook ->
                 val (verdict, evidence) = engine.diagnose(playbook)
                 if (verdict == DiagnosticVerdict.ISSUE_FOUND) foundIssues++
+                if (verdict == DiagnosticVerdict.REVIEW_REQUIRED) manualReviews++
                 internal.update { cur ->
                     val existing = cur.runtimeMap[playbook.id] ?: PlaybookRuntimeState(playbook)
                     val preservedVerdict = if (existing.linkedSnapshotId != null && verdict == DiagnosticVerdict.HEALTHY) {
@@ -160,7 +164,7 @@ class FixerViewModel @Inject constructor(
             internal.update {
                 it.copy(
                     isFullScanRunning = false,
-                    bannerMessage = "Проверено все ${all.size} узлов по 12 подсистемам · Найдено отклонений: $foundIssues",
+                    bannerMessage = "Проверено сценариев: ${all.size} · Отклонений: $foundIssues · Ручная проверка: $manualReviews",
                 )
             }
         }
@@ -168,7 +172,7 @@ class FixerViewModel @Inject constructor(
 
     fun diagnoseSingle(playbookId: String) {
         val playbook = FixerCatalog.byId(playbookId) ?: return
-        viewModelScope.launch {
+        launchSafely {
             updatePlaybookState(playbookId) { it.copy(verdict = DiagnosticVerdict.CHECKING, isBusy = true) }
             val (verdict, evidence) = engine.diagnose(playbook)
             updatePlaybookState(playbookId) { prev ->
@@ -183,14 +187,18 @@ class FixerViewModel @Inject constructor(
 
     fun applySingleFix(playbookId: String) {
         val playbook = FixerCatalog.byId(playbookId) ?: return
-        viewModelScope.launch {
+        FixerSafetyPolicy.automaticFixBlockReason(playbookId)?.let { reason ->
+            internal.update { it.copy(bannerMessage = reason) }
+            return
+        }
+        launchSafely {
             updatePlaybookState(playbookId) { it.copy(isBusy = true) }
             when (val outcome = engine.applyFix(playbook)) {
                 is FixExecutionOutcome.AppliedWithVault -> {
-                    val (_, freshEvidence) = engine.diagnose(playbook)
+                    val (freshVerdict, freshEvidence) = engine.diagnose(playbook)
                     updatePlaybookState(playbookId) { prev ->
                         prev.copy(
-                            verdict = DiagnosticVerdict.FIXED_ACTIVE,
+                            verdict = if (freshVerdict == DiagnosticVerdict.HEALTHY) DiagnosticVerdict.FIXED_ACTIVE else freshVerdict,
                             liveEvidence = freshEvidence,
                             linkedSnapshotId = outcome.snapshotId,
                             isBusy = false,
@@ -199,10 +207,10 @@ class FixerViewModel @Inject constructor(
                     internal.update { it.copy(bannerMessage = outcome.messageRu) }
                 }
                 is FixExecutionOutcome.AppliedMaintenance -> {
-                    val (freshVerdict, freshEvidence) = engine.diagnose(playbook)
+                    val (_, freshEvidence) = engine.diagnose(playbook)
                     updatePlaybookState(playbookId) { prev ->
                         prev.copy(
-                            verdict = freshVerdict,
+                            verdict = DiagnosticVerdict.REVIEW_REQUIRED,
                             liveEvidence = freshEvidence,
                             isBusy = false,
                         )
@@ -219,7 +227,7 @@ class FixerViewModel @Inject constructor(
 
     fun rollbackSingleFix(playbookId: String, snapshotId: Long) {
         val playbook = FixerCatalog.byId(playbookId) ?: return
-        viewModelScope.launch {
+        launchSafely {
             updatePlaybookState(playbookId) { it.copy(isBusy = true) }
             when (val res = vaultManager.rollbackSnapshot(snapshotId)) {
                 is VaultTransactionResult.Success -> {
@@ -246,7 +254,7 @@ class FixerViewModel @Inject constructor(
 
     fun openAppRescuerSheet() {
         internal.update { it.copy(showAppRescuerSheet = true, isAppRescueBusy = true) }
-        viewModelScope.launch {
+        launchSafely {
             val apps = engine.loadUserAppsForRescue()
             internal.update { it.copy(userApps = apps, isAppRescueBusy = false) }
         }
@@ -258,7 +266,7 @@ class FixerViewModel @Inject constructor(
 
     fun inspectAppForRescue(app: InstalledAppBrief) {
         internal.update { it.copy(isAppRescueBusy = true) }
-        viewModelScope.launch {
+        launchSafely {
             val audit = engine.inspectAppNotifications(app)
             internal.update { it.copy(selectedAppAudit = audit, isAppRescueBusy = false) }
         }
@@ -267,7 +275,7 @@ class FixerViewModel @Inject constructor(
     fun executeAppRescue() {
         val audit = internal.value.selectedAppAudit ?: return
         internal.update { it.copy(isAppRescueBusy = true) }
-        viewModelScope.launch {
+        launchSafely {
             when (val outcome = engine.rescueAppNotifications(audit)) {
                 is FixExecutionOutcome.AppliedWithVault -> {
                     val refreshed = engine.inspectAppNotifications(
@@ -300,4 +308,21 @@ class FixerViewModel @Inject constructor(
             cur.copy(runtimeMap = cur.runtimeMap + (id to transform(current)))
         }
     }
+    private fun launchSafely(action: suspend () -> Unit) = viewModelScope.launch {
+        try {
+            action()
+        } catch (cancelled: CancellationException) {
+            internal.update { it.copy(isFullScanRunning = false, isAppRescueBusy = false, runtimeMap = it.runtimeMap.mapValues { (_, item) -> if (item.isBusy) item.copy(isBusy = false, verdict = DiagnosticVerdict.REVIEW_REQUIRED, liveEvidence = "Операция прервана; состояние не подтверждено") else item }) }
+            throw cancelled
+        } catch (error: Exception) {
+            internal.update { it.copy(
+                    isFullScanRunning = false, isAppRescueBusy = false,
+                    runtimeMap = it.runtimeMap.mapValues { (_, item) ->
+                        if (item.isBusy) item.copy(isBusy = false, verdict = DiagnosticVerdict.REVIEW_REQUIRED, liveEvidence = "Состояние не подтверждено: ${error.message}") else item
+                    },
+                    bannerMessage = "Операция не завершена: ${error.message}. Проверьте историю StateVault.",
+                ) }
+        }
+    }
+
 }

@@ -180,7 +180,15 @@ private fun OptimizerScreen(
             }
         }
 
-        when (state.activeTab) {
+        if (state.activeTab in setOf(OptimizerSubTab.TWEAKS, OptimizerSubTab.UI_TUNER) && !state.hasLiveState) {
+            item {
+                SwagCard {
+                    Text("Состояние параметров не получено", style = MaterialTheme.typography.titleMedium)
+                    Text("Неизвестные значения не показываются как выключенные или стандартные. Проверьте доступ и повторите чтение.")
+                    OutlinedButton(onClick = viewModel::refreshAll, enabled = !state.isBusy) { Text("Повторить чтение") }
+                }
+            }
+        } else when (state.activeTab) {
             // =================================================================
             // TAB 1: PRESETS + PORTABLE JSON PROFILES
             // =================================================================

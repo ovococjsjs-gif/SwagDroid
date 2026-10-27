@@ -336,7 +336,7 @@ class SecurityPipelineEngine @Inject constructor(
             )
         }
 
-        executor.execute("am force-stop $pkg")
+        // No unjournaled force-stop before preflight: quarantine consists of verified AppOps/package changes.
 
         val tx = vaultManager.applyTransaction(
             title = "Карантин угрозы: $appLabel",

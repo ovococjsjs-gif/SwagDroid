@@ -9,6 +9,8 @@ import com.swagdroid.core.model.PrivilegeTier
 import com.swagdroid.core.model.RiskLevel
 import com.swagdroid.core.model.SettingNamespace
 import com.swagdroid.core.privilege.PrivilegedCommandExecutor
+import com.swagdroid.core.privilege.SystemReadQuery
+import com.swagdroid.core.privilege.requireReadOutput
 import com.swagdroid.core.vault.StateVaultManager
 import com.swagdroid.core.vault.VaultMutationSpec
 import com.swagdroid.core.vault.VaultTransactionResult
@@ -198,7 +200,7 @@ class SystemTweaksController @Inject constructor(
         if (!executor.currentTier().satisfies(PrivilegeTier.ADB_SHIZUKU)) {
             return@withContext VaultTransactionResult.Failure(
                 "Для применения пресета подключите Беспроводной ADB / Shizuku или Root на Главной.",
-                autoReverted = true,
+
             )
         }
 
@@ -306,13 +308,13 @@ class SystemTweaksController @Inject constructor(
         val profile = runCatching { decodePortableProfile(rawJson) }.getOrElse { err ->
             return@withContext VaultTransactionResult.Failure(
                 "Некорректный JSON-профиль: ${err.message}",
-                autoReverted = true,
+
             )
         }
         if (!executor.currentTier().satisfies(PrivilegeTier.ADB_SHIZUKU)) {
             return@withContext VaultTransactionResult.Failure(
                 "Подключите Беспроводной ADB / Shizuku или Root для импорта системного профиля.",
-                autoReverted = true,
+
             )
         }
 
@@ -421,7 +423,7 @@ class SystemTweaksController @Inject constructor(
     suspend fun applyCustomPrivateDnsHost(customHost: String): VaultTransactionResult {
         val clean = customHost.trim().lowercase()
         if (!SAFE_DNS_HOST_REGEX.matches(clean)) {
-            return VaultTransactionResult.Failure("Введите корректный DoT-домен (например, dns.adguard-dns.com)", true)
+            return VaultTransactionResult.Failure("Введите корректный DoT-домен (например, dns.adguard-dns.com)")
         }
         return vaultManager.applyTransaction(
             title = "Кастомный DoT DNS: $clean",
@@ -439,7 +441,7 @@ class SystemTweaksController @Inject constructor(
             ?.substringBefore('/')
         val targets = thirdPartyUserPackages(defaultImePkg).take(50)
         if (targets.isEmpty()) {
-            return@withContext VaultTransactionResult.Failure("Сторонних приложений для ограничения не найдено", true)
+            return@withContext VaultTransactionResult.Failure("Сторонних приложений для ограничения не найдено")
         }
         vaultManager.applyTransaction(
             title = "Clipboard Guard (${targets.size} прил.)",
@@ -482,10 +484,10 @@ class SystemTweaksController @Inject constructor(
 
     suspend fun setKernelSwappiness(targetSwappiness: Int): VaultTransactionResult = withContext(Dispatchers.IO) {
         if (executor.currentTier() != PrivilegeTier.ROOT) {
-            return@withContext VaultTransactionResult.Failure("Настройка vm.swappiness требует Root-доступа", true)
+            return@withContext VaultTransactionResult.Failure("Настройка vm.swappiness требует Root-доступа")
         }
         val clamped = targetSwappiness.coerceIn(10, 160)
-        val prev = executor.execute("cat /proc/sys/vm/swappiness").stdoutText.trim().toIntOrNull()?.coerceIn(0, 200) ?: 60
+        val prev = executor.query(SystemReadQuery.Fixed.SWAPPINESS).requireReadOutput().stdoutText.trim().toIntOrNull()?.coerceIn(0, 200) ?: 60
         vaultManager.applyTransaction(
             title = "ZRAM / VM Swappiness → $clamped",
             reason = "Баланс сжатия страниц памяти ядра Linux",
@@ -527,9 +529,10 @@ class SystemTweaksController @Inject constructor(
             return@withContext "Подключите Беспроводной ADB / Shizuku или Root для запуска ART-компиляции и TRIM."
         }
         val trimRes = executor.execute("sm fstrim")
+        if (!trimRes.isSuccess) return@withContext "TRIM не подтверждён: ${trimRes.stderrText.ifBlank { "код ${trimRes.exitCode}" }}. ART не запускался."
         val artRes = executor.execute("cmd package compile -m ${mode.cliMode} -a")
         val trimStatus = if (trimRes.isSuccess) "UFS TRIM выполнен" else "TRIM код ${trimRes.exitCode}"
-        val artStatus = if (artRes.isSuccess) "ART (${mode.cliMode}) завершён" else "bg-dexopt запущен"
+        val artStatus = if (artRes.isSuccess) "ART (${mode.cliMode}) завершён" else "ART не завершён: ${artRes.stderrText.ifBlank { "код ${artRes.exitCode}" }}"
         "$trimStatus · $artStatus"
     }
 
@@ -548,7 +551,7 @@ class SystemTweaksController @Inject constructor(
 
     suspend fun applyAndroidGameMode(pkg: String, mode: AndroidGameModeChoice): VaultTransactionResult {
         if (!SAFE_PKG_REGEX.matches(pkg)) {
-            return VaultTransactionResult.Failure("Некорректное имя пакета", true)
+            return VaultTransactionResult.Failure("Некорректное имя пакета")
         }
         return vaultManager.applyTransaction(
             title = "Game Mode ($pkg → ${mode.labelRu})",
@@ -572,12 +575,12 @@ class SystemTweaksController @Inject constructor(
         actionTitleRu: String,
     ): VaultTransactionResult = withContext(Dispatchers.IO) {
         if (packageIds.isEmpty()) {
-            return@withContext VaultTransactionResult.Failure("Не выбрано ни одного пакета", autoReverted = true)
+            return@withContext VaultTransactionResult.Failure("Не выбрано ни одного пакета")
         }
         if (!executor.currentTier().satisfies(PrivilegeTier.ADB_SHIZUKU)) {
             return@withContext VaultTransactionResult.Failure(
                 "Для заморозки/отключения блоатвари подключите Беспроводной ADB / Shizuku или Root.",
-                autoReverted = true,
+
             )
         }
         val mutations = packageIds.filter { SAFE_PKG_REGEX.matches(it) }.map { pkg ->

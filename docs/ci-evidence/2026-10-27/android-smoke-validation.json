@@ -1,0 +1,227 @@
+{
+  "commit": "75bd09de5447d34d4b235bd5b7a02c12d1adba36",
+  "branch": "arena/975757fb-swagdroid",
+  "runId": 40443770872,
+  "runUrl": "https://github.com/ovococjsjs-gif/SwagDroid/actions/runs/40443770872",
+  "checkRunId": 121990027605,
+  "conclusion": "success",
+  "jobs": [
+    {
+      "completedAt": "2026-10-27T03:32:57Z",
+      "conclusion": "success",
+      "databaseId": 121990027605,
+      "name": "Unit Tests + Debug & R8 Release APK",
+      "startedAt": "2026-10-27T03:22:08Z",
+      "status": "completed",
+      "steps": [
+        {
+          "conclusion": "success",
+          "name": "Set up job",
+          "number": 1,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Checkout repository",
+          "number": 2,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Set up JDK 21 (Temurin)",
+          "number": 3,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Run Tests & Build Debug + R8 Release APKs",
+          "number": 4,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Upload SwagDroid v1.0.0 Release APK (R8 Optimized & Signed)",
+          "number": 5,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Upload SwagDroid v1.0.0 Debug APK",
+          "number": 6,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Set up JDK 21 (Temurin)",
+          "number": 11,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Checkout repository",
+          "number": 12,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Complete job",
+          "number": 13,
+          "status": "completed"
+        }
+      ],
+      "url": "https://github.com/ovococjsjs-gif/SwagDroid/actions/runs/40443770872/job/121990027605"
+    }
+  ],
+  "unit": {
+    "totals": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 156,
+      "xmlFiles": 14
+    },
+    "modules": {
+      ":core:privilege": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 36
+      },
+      ":core:vault": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 62
+      },
+      ":feature:adblock": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 4
+      },
+      ":feature:cleaner": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 34
+      },
+      ":feature:dashboard": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 2
+      },
+      ":feature:fixer": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 10
+      },
+      ":feature:optimizer": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 3
+      },
+      ":feature:security": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 5
+      }
+    }
+  },
+  "android": {
+    "totals": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 8,
+      "xmlFiles": 2
+    },
+    "modules": {
+      ":app": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 4
+      },
+      ":core:vault": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 4
+      }
+    },
+    "device": {
+      "ro.build.version.sdk": "35",
+      "ro.build.version.release": "15",
+      "ro.product.cpu.abi": "x86_64",
+      "ro.hardware": "ranchu",
+      "ro.build.fingerprint": "google/sdk_gphone64_x86_64/emu64xa:15/AE3A.240806.043/12960925:userdebug/dev-keys"
+    },
+    "runners": {
+      "app": "com.swagdroid.debug.test/androidx.test.runner.AndroidJUnitRunner",
+      "core:vault": "com.swagdroid.core.vault.test/androidx.test.runner.AndroidJUnitRunner",
+      "transport": "adb am instrument; stock AndroidJUnitRunner",
+      "matchingDebugCertificateSha256": "45babba41cbe7ea3f0fe43df081d32e51e7683e265a29f39cba9669c5ccc05ff"
+    },
+    "resultSource": "Actual AndroidJUnitRunner ADB status protocol, converted to JUnit XML only after validating the complete run"
+  },
+  "artifacts": [
+    {
+      "id": 12707398706,
+      "name": "SwagDroid-v1.0.0-debug-apk",
+      "size_in_bytes": 13468401,
+      "digest": "sha256:1552d97babd2d05a4751e0397298035e125cf71a62d97cc8890c2d3f107f39ff",
+      "expired": false,
+      "archive_download_url": "https://api.github.com/repos/ovococjsjs-gif/SwagDroid/actions/artifacts/12707398706/zip"
+    },
+    {
+      "id": 12706984253,
+      "name": "SwagDroid-v1.0.0-release-apk",
+      "size_in_bytes": 2306093,
+      "digest": "sha256:06544922e2d540e52fb2ece4c882393aa8502bbe2d12d154426e8c2c5d68ab65",
+      "expired": false,
+      "archive_download_url": "https://api.github.com/repos/ovococjsjs-gif/SwagDroid/actions/artifacts/12706984253/zip"
+    }
+  ],
+  "limits": [
+    "Only Android 15 API 35 x86_64 emulator, BASIC mode",
+    "Debug target APK tested; Release only built",
+    "No real phone, Root/Shizuku, TalkBack or production signing validation",
+    "No destructive cleanup confirmation",
+    "Room migration used a synthetic v1 database, not an existing user installation",
+    "Screenshots retained on CI runner, not retrieved or visually inspected"
+  ],
+  "priorAttempts": [
+    {
+      "runId": 40435729090,
+      "result": "Emulator did not connect to ADB; Android tests did not run"
+    },
+    {
+      "runId": 40437035545,
+      "result": "Emulator informational version command ended setup early; Android tests did not run"
+    },
+    {
+      "runId": 40437921693,
+      "result": "Emulator could not locate the AVD; explicit AVD discovery added"
+    },
+    {
+      "runId": 40438962122,
+      "result": "Emulator booted and Debug launched; connected test host dependency download failed with network unreachable"
+    },
+    {
+      "runId": 40440887876,
+      "result": "4 Room instrumentation tests passed; app runner rejected mismatched target/test certificates"
+    },
+    {
+      "runId": 40442038114,
+      "result": "Certificates matched; SDK apksigner output format required parser correction"
+    },
+    {
+      "runId": 40442852475,
+      "result": "SDK image archive download was invalid; bounded package-install retry added"
+    }
+  ]
+}

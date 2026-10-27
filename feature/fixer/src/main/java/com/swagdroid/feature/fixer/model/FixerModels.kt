@@ -78,6 +78,7 @@ enum class DiagnosticVerdict(val labelRu: String) {
     CHECKING("Проверяется…"),
     HEALTHY("В норме"),
     ISSUE_FOUND("Найдено отклонение"),
+    REVIEW_REQUIRED("Нужна ручная проверка"),
     FIXED_ACTIVE("Исправлено · есть откат"),
     NEEDS_PRIVILEGE("Нужен ADB / Root"),
     NOT_APPLICABLE("Не для этой марки"),

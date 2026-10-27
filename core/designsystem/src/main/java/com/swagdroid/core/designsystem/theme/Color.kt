@@ -4,7 +4,7 @@ import androidx.compose.ui.graphics.Color
 
 // Brand & Accent Colors (Emerald + Cyber Cyan)
 val SwagEmerald80 = Color(0xFF5EEAD4)
-val SwagEmerald40 = Color(0xFF0D9488)
+val SwagEmerald40 = Color(0xFF0F766E) // readable white button labels in the light theme
 val SwagEmeraldContainerDark = Color(0xFF0F3D39)
 val SwagEmeraldContainerLight = Color(0xFFCCFBF1)
 

@@ -23,6 +23,7 @@ import com.swagdroid.feature.security.model.AppTrackerScanItem
 import com.swagdroid.feature.security.model.QuarantineEntry
 import com.swagdroid.feature.security.model.SecuritySubTab
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -139,7 +140,7 @@ class SecurityCenterViewModel @Inject constructor(
     )
 
     init {
-        viewModelScope.launch {
+        launchSafely {
             blocklistRepo.ensureLoaded()
             refreshAdblockStatus()
         }
@@ -155,7 +156,7 @@ class SecurityCenterViewModel @Inject constructor(
 
     fun runThreatScan() {
         if (internal.value.isScanning) return
-        viewModelScope.launch {
+        launchSafely {
             internal.update { it.copy(isScanning = true, scanStep = 0, scanTotal = 1, bannerMessage = null) }
             val decisions = pipeline.runFullThreatScan { step, total ->
                 internal.update { it.copy(scanStep = step, scanTotal = total) }
@@ -166,7 +167,7 @@ class SecurityCenterViewModel @Inject constructor(
                     hasScannedThreatsOnce = true,
                     isScanning = false,
                     bannerMessage = if (decisions.isEmpty()) {
-                        "Сканирование завершено: угроз, майнеров и скрытого Adware не обнаружено!"
+                        "В проверенной части данных совпадений не найдено. Это не подтверждает безопасность всего устройства."
                     } else {
                         "Найдено угроз и подозрительных объектов: ${decisions.size}"
                     },
@@ -177,7 +178,7 @@ class SecurityCenterViewModel @Inject constructor(
 
     fun quarantineDecision(decision: AggregatedThreatDecision) {
         val pkg = decision.packageName ?: return
-        viewModelScope.launch {
+        launchSafely {
             val res = pipeline.quarantinePackage(
                 pkg = pkg,
                 appLabel = decision.displayTitle,
@@ -202,7 +203,7 @@ class SecurityCenterViewModel @Inject constructor(
     fun deleteLooseMaliciousFile(decision: AggregatedThreatDecision) {
         val path = decision.apkFilePath ?: return
         if (decision.packageName != null) return
-        viewModelScope.launch {
+        launchSafely {
             val deleted = runCatching { File(path).delete() }.getOrDefault(false)
             if (deleted) {
                 internal.update { cur ->
@@ -217,7 +218,7 @@ class SecurityCenterViewModel @Inject constructor(
 
     fun cureSystemThreat(decision: AggregatedThreatDecision) {
         if (decision.targetKey == "setting:global:http_proxy") {
-            viewModelScope.launch {
+            launchSafely {
                 if (pipeline.cureHijackedProxy()) {
                     internal.update { cur ->
                         cur.copy(
@@ -231,7 +232,7 @@ class SecurityCenterViewModel @Inject constructor(
     }
 
     fun restoreFromQuarantine(entry: QuarantineEntry) {
-        viewModelScope.launch {
+        launchSafely {
             val ok = pipeline.restoreFromQuarantine(entry)
             if (ok) {
                 internal.update { cur ->
@@ -247,7 +248,7 @@ class SecurityCenterViewModel @Inject constructor(
 
     fun runTrackerRadarScan() {
         if (internal.value.isScanning) return
-        viewModelScope.launch {
+        launchSafely {
             internal.update { it.copy(isScanning = true, bannerMessage = null) }
             val reports = pipeline.scanInstalledAppsForTrackers()
             internal.update {
@@ -262,7 +263,7 @@ class SecurityCenterViewModel @Inject constructor(
     }
 
     fun isolateAppBackgroundTraffic(pkg: String, label: String) {
-        viewModelScope.launch {
+        launchSafely {
             when (val res = adblockController.setAppBackgroundNetworkBlocked(pkg, label, blockBackground = true)) {
                 is VaultTransactionResult.Success -> {
                     internal.update {
@@ -295,12 +296,12 @@ class SecurityCenterViewModel @Inject constructor(
     }
 
     fun enableAdbPrivateDns() {
-        viewModelScope.launch {
+        launchSafely {
             when (val res = adblockController.enableAdbPrivateDns(internal.value.selectedResolver)) {
                 is VaultTransactionResult.Success -> {
                     refreshAdblockStatus()
                     internal.update {
-                        it.copy(bannerMessage = "Системный DoT AdBlock активирован без слота VPN (точка отката #${res.snapshotId})")
+                        it.copy(bannerMessage = "Параметры Private DNS записаны и прочитаны обратно (#${res.snapshotId}). Работу и фильтрацию внешнего резолвера нужно проверить отдельно.")
                     }
                 }
                 is VaultTransactionResult.Failure -> {
@@ -311,15 +312,19 @@ class SecurityCenterViewModel @Inject constructor(
     }
 
     fun disableAdbPrivateDns() {
-        viewModelScope.launch {
-            adblockController.disableAdbPrivateDns()
-            refreshAdblockStatus()
-            internal.update { it.copy(bannerMessage = "Системный Private DNS переведён в авто-режим") }
+        launchSafely {
+            when (val result = adblockController.disableAdbPrivateDns()) {
+                is VaultTransactionResult.Success -> {
+                    refreshAdblockStatus()
+                    internal.update { it.copy(bannerMessage = "Параметр Private DNS переведён в авто-режим и прочитан обратно") }
+                }
+                is VaultTransactionResult.Failure -> internal.update { it.copy(bannerMessage = result.errorMessage) }
+            }
         }
     }
 
     fun applyRootHosts() {
-        viewModelScope.launch {
+        launchSafely {
             when (val res = adblockController.applyRootSystemlessHosts()) {
                 is VaultTransactionResult.Success -> {
                     refreshAdblockStatus()
@@ -387,4 +392,15 @@ class SecurityCenterViewModel @Inject constructor(
             )
         }
     }
+    private fun launchSafely(action: suspend () -> Unit) = viewModelScope.launch {
+        try {
+            action()
+        } catch (cancelled: CancellationException) {
+            internal.update { it.copy(isScanning = false) }
+            throw cancelled
+        } catch (error: Exception) {
+            internal.update { it.copy(isScanning = false, hasScannedThreatsOnce = false, hasScannedTrackersOnce = false, bannerMessage = "Проверка/операция не завершена: ${error.message}. Отсутствие угроз или успех изменения не подтверждены.") }
+        }
+    }
+
 }

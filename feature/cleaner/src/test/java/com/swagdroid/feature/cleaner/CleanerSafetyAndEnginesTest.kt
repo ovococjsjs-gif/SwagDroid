@@ -89,7 +89,7 @@ class CleanerSafetyAndEnginesTest {
             ),
         )
 
-        // Genuine game cache & Telegram video circles are safe to clean
+        // These paths are not known credential paths; that does NOT prove they are safe to delete.
         assertTrue(
             AuthAndCredentialsGuard.isPathSafeToClean(
                 "/sdcard/Android/data/com.heavy.shooter/cache/shader_01.tmp",
