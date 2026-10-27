@@ -95,7 +95,7 @@ class BasicSmokeTest {
         compose.onNodeWithTag("fix_$id").assertIsNotEnabled()
         compose.onNodeWithTag("diagnose_$id").performClick()
         compose.waitUntil(30_000) {
-            compose.onAllNodes(hasTestTag("verdict_$id") and hasText("Нужна ручная проверка")).fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodes(hasTestTag("verdict_$id") and hasText("Нужна ручная проверка"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithTag("fix_$id").assertIsNotEnabled()
         assertEquals(before, Settings.Secure.getString(resolver, "enabled_accessibility_services"))

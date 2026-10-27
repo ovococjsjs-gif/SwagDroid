@@ -95,10 +95,24 @@ if ! (sudo -n apt-get update -q && sudo -n apt-get install -y -q   libgl1 libpul
 fi
 
 echo "=== Install Android 15 / API 35 emulator image ==="
-if ! timeout 900 "$SDKMANAGER" "platform-tools" "emulator" "$IMAGE" > "$OUTPUT/sdk-install.log" 2>&1; then
-  tail -n 70 "$OUTPUT/sdk-install.log"
-  fail "SDK/image installation failed"
-fi
+installed=false
+: > "$OUTPUT/sdk-install.log"
+for attempt in 1 2 3; do
+  if timeout --kill-after=10s 900 "$SDKMANAGER" "platform-tools" "emulator" "$IMAGE" > "$OUTPUT/sdk-attempt-$attempt.log" 2>&1; then
+    cat "$OUTPUT/sdk-attempt-$attempt.log" >> "$OUTPUT/sdk-install.log"
+    installed=true
+    break
+  fi
+  cat "$OUTPUT/sdk-attempt-$attempt.log" >> "$OUTPUT/sdk-install.log"
+  if [[ "$attempt" -ge 3 ]] || ! grep -Eqi 'ZipFile|archive|Network|timed out|connection|SSL' "$OUTPUT/sdk-attempt-$attempt.log"; then break; fi
+  echo "::warning title=Android SDK download retry::Package download/archive failure on attempt $attempt; retrying SDK installation only. Test failures are never retried or ignored."
+  # Failed package-operation staging only, on this disposable runner. Keep installed SDKs.
+  if [[ -d "$SDK/.temp" ]]; then
+    find "$SDK/.temp" -mindepth 1 -maxdepth 1 -type d -name 'PackageOperation*' -exec rm -rf -- {} +
+  fi
+  sleep 2
+done
+[[ "$installed" == true ]] || fail "SDK/image installation failed after bounded download retries"
 "$EMULATOR" -accel-check > "$OUTPUT/acceleration.txt" 2>&1 || { cat "$OUTPUT/acceleration.txt"; fail "Emulator acceleration check failed"; }
 # Some emulator versions return non-zero for this informational flag. Do not turn
 # a version probe into a smoke failure; acceleration/boot/tests are the actual gates.
