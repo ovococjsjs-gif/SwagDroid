@@ -1,0 +1,158 @@
+{
+  "source": "JUnit XML summaries emitted by scripts/summarize-junit.py as GitHub check annotations",
+  "commit": "9623ac0053366309dbcdd60be7b7d9a1abfaf0ff",
+  "branch": "arena/975757fb-swagdroid",
+  "runUrl": "https://github.com/ovococjsjs-gif/SwagDroid/actions/runs/40432680309",
+  "runId": 40432680309,
+  "checkRunId": 121953896942,
+  "conclusion": "success",
+  "totals": {
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "tests": 156,
+    "xmlFiles": 14
+  },
+  "modules": {
+    ":core:privilege": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 36
+    },
+    ":core:vault": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 62
+    },
+    ":feature:adblock": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 4
+    },
+    ":feature:cleaner": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 34
+    },
+    ":feature:dashboard": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 2
+    },
+    ":feature:fixer": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 10
+    },
+    ":feature:optimizer": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 3
+    },
+    ":feature:security": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 5
+    }
+  },
+  "jobs": [
+    {
+      "completedAt": "2026-10-27T01:32:27Z",
+      "conclusion": "success",
+      "databaseId": 121953896942,
+      "name": "Unit Tests + Debug & R8 Release APK",
+      "startedAt": "2026-10-27T01:27:37Z",
+      "status": "completed",
+      "steps": [
+        {
+          "conclusion": "success",
+          "name": "Set up job",
+          "number": 1,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Checkout repository",
+          "number": 2,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Set up JDK 21 (Temurin)",
+          "number": 3,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Run Tests & Build Debug + R8 Release APKs",
+          "number": 4,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Upload SwagDroid v1.0.0 Release APK (R8 Optimized & Signed)",
+          "number": 5,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Upload SwagDroid v1.0.0 Debug APK",
+          "number": 6,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Set up JDK 21 (Temurin)",
+          "number": 11,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Checkout repository",
+          "number": 12,
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "Complete job",
+          "number": 13,
+          "status": "completed"
+        }
+      ],
+      "url": "https://github.com/ovococjsjs-gif/SwagDroid/actions/runs/40432680309/job/121953896942"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 12703270900,
+      "name": "SwagDroid-v1.0.0-debug-apk",
+      "size_in_bytes": 13463282,
+      "digest": "sha256:21b9ab9ea2789a207c3c08e784c36a9a6f98c0f8d6962f40a99d76537e4151da",
+      "expired": false,
+      "created_at": "2026-10-27T01:32:24Z",
+      "archive_download_url": "https://api.github.com/repos/ovococjsjs-gif/SwagDroid/actions/artifacts/12703270900/zip"
+    },
+    {
+      "id": 12702992261,
+      "name": "SwagDroid-v1.0.0-release-apk",
+      "size_in_bytes": 2304355,
+      "digest": "sha256:8a403c1b8dc6986963e60dfcf03fc4aa17c6eab0d187dcd383c4c639c0338f36",
+      "expired": false,
+      "created_at": "2026-10-27T01:32:21Z",
+      "archive_download_url": "https://api.github.com/repos/ovococjsjs-gif/SwagDroid/actions/artifacts/12702992261/zip"
+    }
+  ],
+  "limits": [
+    "No Android device or emulator run",
+    "No Android Room migration instrumentation test",
+    "APK payloads and signing certificates not inspected; artifact download host is inaccessible from the sandbox"
+  ]
+}
