@@ -182,18 +182,8 @@ APKSIGNER="$(find "$SDK/build-tools" -maxdepth 2 -type f -name apksigner | sort 
 [[ -x "$APKSIGNER" ]] || fail "apksigner is unavailable"
 "$APKSIGNER" verify --print-certs app/build/outputs/apk/debug/app-debug.apk > "$OUTPUT/app-signature.txt" 2>&1
 "$APKSIGNER" verify --print-certs "${app_tests[0]}" > "$OUTPUT/app-test-signature.txt" 2>&1
-python3 - "$OUTPUT" <<'PYSIGN'
-import re,sys
-from pathlib import Path
-root=Path(sys.argv[1])
-def certificates(name):
-    return sorted(re.findall(r"Signer #\d+ certificate SHA-256 digest: ([0-9a-fA-F]+)", (root/name).read_text()))
-app=certificates("app-signature.txt")
-test=certificates("app-test-signature.txt")
-assert app and app==test, "Debug target and instrumentation APK signatures do not match"
-(root/"matching-certificate.txt").write_text(",".join(app))
-print("Verified matching Debug/instrumentation signing certificates")
-PYSIGN
+python3 scripts/verify-apk-signatures.py --app "$OUTPUT/app-signature.txt" \
+  --test "$OUTPUT/app-test-signature.txt" --output "$OUTPUT/matching-certificate.txt"
 
 echo "=== Install and cold-launch the actual Debug APK ==="
 "$ADB" -s "$SERIAL" install -r -t app/build/outputs/apk/debug/app-debug.apk > "$OUTPUT/install.log" 2>&1
