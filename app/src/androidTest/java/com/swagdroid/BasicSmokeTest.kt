@@ -1,5 +1,6 @@
 package com.swagdroid
 
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Context
 import android.os.Build
 import android.os.Environment
@@ -96,11 +97,27 @@ class BasicSmokeTest {
         openTab("CLEANER")
         compose.activityRule.scenario.recreate()
         compose.waitUntil(10_000) { exists("cleaner_access") }
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        automation.serviceInfo = automation.serviceInfo.apply {
+            flags = flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+        }
         compose.onNodeWithTag("cleaner_access").performClick()
-        InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+        // waitForIdleSync only waits for OUR process, not the Settings activity. Do not
+        // send Back while the outgoing launch is still in flight (that can close MainActivity).
+        compose.waitUntil(20_000) { foregroundPackage() == "com.android.settings" }
         storageAccess(true)
-        shell("input keyevent 4") // Return from Android settings, not a mocked permission callback.
-        compose.waitUntil(20_000) { exists("cleaner_scan") }
+        compose.waitUntil(10_000) { Environment.isExternalStorageManager() }
+        repeat(3) {
+            if (foregroundPackage() == "com.android.settings") {
+                shell("input keyevent 4")
+                runCatching { automation.waitForIdle(500, 5_000) }
+            }
+        }
+        try {
+            compose.waitUntil(20_000) { exists("cleaner_scan") }
+        } catch (error: Exception) {
+            throw AssertionError("No scan entry after Settings: foreground=${foregroundPackage()}, storage=${Environment.isExternalStorageManager()}", error)
+        }
         compose.onNodeWithTag("cleaner_scan").assertIsEnabled()
         assertFalse(exists("cleanup_results"))
     }
@@ -180,6 +197,9 @@ class BasicSmokeTest {
         val packageName = InstrumentationRegistry.getInstrumentation().targetContext.packageName
         shell("appops set --uid $packageName MANAGE_EXTERNAL_STORAGE ${if (granted) "allow" else "ignore"}")
     }
+
+    private fun foregroundPackage(): String? =
+        InstrumentationRegistry.getInstrumentation().uiAutomation.rootInActiveWindow?.packageName?.toString()
 
     private fun shell(command: String) {
         val descriptor = InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command)
