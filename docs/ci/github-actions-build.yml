@@ -45,6 +45,9 @@ jobs:
             **/build/test-results/testDebugUnitTest/*.xml
             **/build/reports/tests/testDebugUnitTest/**
             core/vault/schemas/**
+            **/build/outputs/androidTest-results/connected/**
+            **/build/reports/androidTests/connected/**
+            build/android-smoke/**
 
       - name: Upload SwagDroid v1.0.0 Release APK (R8 Optimized & Signed)
         uses: actions/upload-artifact@v7

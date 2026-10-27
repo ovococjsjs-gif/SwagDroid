@@ -21,3 +21,7 @@
 # Scratch / test artifacts
 pelican_bicycle.png
 pelican_bicycle.svg
+
+# Python CI helpers
+__pycache__/
+*.py[cod]

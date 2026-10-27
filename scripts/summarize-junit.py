@@ -24,9 +24,15 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--allow-empty", action="store_true", help="Only for a build step that already failed")
+    parser.add_argument("--kind", choices=("unit", "android"), default="unit")
+    parser.add_argument("--min-tests", type=int, default=1)
+    parser.add_argument("--require-module", action="append", default=[])
+    parser.add_argument("--fail-on-skip", action="store_true")
     args = parser.parse_args()
     root = args.root.resolve()
-    files = sorted(root.glob("**/build/test-results/testDebugUnitTest/TEST-*.xml"))
+    pattern = "**/build/test-results/testDebugUnitTest/TEST-*.xml" if args.kind == "unit" else "**/build/outputs/androidTest-results/connected/**/TEST-*.xml"
+    files = sorted(root.glob(pattern))
+    label = "JUnit" if args.kind == "unit" else "Android instrumentation"
     modules = defaultdict(lambda: dict(tests=0, failures=0, errors=0, skipped=0))
     malformed = []
     failed_cases = []
@@ -49,28 +55,37 @@ def main():
                     if problem is None:
                         problem = case.find("error")
                     if problem is not None:
-                        failed_cases.append({"module": module, "class": case.get("classname", ""), "name": case.get("name", ""), "message": problem.get("message", (problem.text or "")[:1000])[:1500]})
+                        failed_cases.append({"module": module, "class": case.get("classname", ""), "name": case.get("name", ""), "message": problem.get("message", (problem.text or "")[:3000])[:3000], "details": (problem.text or "")[:4000] if args.kind == "android" else ""})
         except (ET.ParseError, ValueError, OSError) as error:
             malformed.append(f"{relative}: {error}")
 
     totals = {key: sum(stats[key] for stats in modules.values()) for key in ("tests", "failures", "errors", "skipped")}
-    report = {"headSha": os.environ.get("GITHUB_SHA"), "xmlFiles": len(files), "totals": totals, "modules": dict(sorted(modules.items())), "malformed": malformed, "failedCases": failed_cases}
-    output = root / "build/ci-validation-summary.json"
+    required = {":" + module.strip(":") for module in args.require_module}
+    missing_modules = sorted(required.difference(modules))
+    report = {"kind": args.kind, "missingModules": missing_modules, "headSha": os.environ.get("GITHUB_SHA"), "xmlFiles": len(files), "totals": totals, "modules": dict(sorted(modules.items())), "malformed": malformed, "failedCases": failed_cases}
+    output = root / ("build/ci-validation-summary.json" if args.kind == "unit" else "build/ci-android-validation-summary.json")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     if not files:
-        annotation("warning" if args.allow_empty else "error", "JUnit unavailable", "No JUnit XML found; tests have not been confirmed.")
+        annotation("warning" if args.allow_empty else "error", label + " unavailable", "No JUnit XML found; tests have not been confirmed.")
     else:
-        annotation("notice", "JUnit totals", json.dumps({"xmlFiles": len(files), **totals}, sort_keys=True))
+        annotation("notice", label + " totals", json.dumps({"xmlFiles": len(files), **totals}, sort_keys=True))
     for module, stats in sorted(modules.items()):
-        annotation("notice", "JUnit " + module, json.dumps(stats, sort_keys=True))
+        annotation("notice", label + " " + module, json.dumps(stats, sort_keys=True))
     for error in malformed:
-        annotation("error", "JUnit report unreadable", error)
+        annotation("error", label + " report unreadable", error)
     for failure in failed_cases[:15]:
-        annotation("error", "JUnit failed test", json.dumps(failure, ensure_ascii=False))
+        annotation("error", label + " failed test", json.dumps(failure, ensure_ascii=False))
 
-    summary = ["## Gradle JUnit results", "", "| Module | Tests | Failures | Errors | Skipped |", "|---|---:|---:|---:|---:|"]
+    if missing_modules:
+        annotation("error", label + " missing modules", ", ".join(missing_modules))
+    if files and totals["tests"] < args.min_tests:
+        annotation("error", label + " incomplete run", f"Expected at least {args.min_tests} tests, found {totals['tests']}")
+    if args.fail_on_skip and totals["skipped"]:
+        annotation("error", label + " skipped tests", "Required smoke cases were skipped")
+
+    summary = ["## " + label + " results", "", "| Module | Tests | Failures | Errors | Skipped |", "|---|---:|---:|---:|---:|"]
     for module, stats in sorted(modules.items()):
         summary.append(f"| `{module}` | {stats['tests']} | {stats['failures']} | {stats['errors']} | {stats['skipped']} |")
     summary.append(f"\nTotal: **{totals['tests']}**, failures: **{totals['failures']}**, errors: **{totals['errors']}**, skipped: **{totals['skipped']}**.")
@@ -78,7 +93,8 @@ def main():
         summary.append("**No JUnit XML: tests are not confirmed.**")
     if malformed:
         summary.append("**Some reports could not be read; the counts are incomplete.**")
-    for path in sorted((root / "core/vault/schemas").glob("**/*.json")):
+    schema_files = sorted((root / "core/vault/schemas").glob("**/*.json")) if args.kind == "unit" else []
+    for path in schema_files:
         try:
             schema = json.loads(path.read_text(encoding="utf-8"))
             # A generated schema is source metadata, not a device database. Retain it in the
@@ -93,11 +109,11 @@ def main():
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as stream:
             stream.write("\n".join(summary) + "\n")
 
-    if malformed or totals["failures"] or totals["errors"]:
+    if malformed or totals["failures"] or totals["errors"] or missing_modules or (args.fail_on_skip and totals["skipped"]):
         return 1
     if not files or totals["tests"] == 0:
         return 0 if args.allow_empty else 1
-    return 0
+    return 0 if totals["tests"] >= args.min_tests else 1
 
 
 if __name__ == "__main__":

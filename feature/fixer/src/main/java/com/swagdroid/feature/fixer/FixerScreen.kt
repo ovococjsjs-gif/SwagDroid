@@ -40,6 +40,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -109,7 +110,7 @@ fun FixerScreen(
     onDismissBanner: () -> Unit,
 ) {
     LazyColumn(
-        modifier = Modifier
+        modifier = Modifier.testTag("fixer_list")
             .fillMaxSize()
             .padding(contentPadding),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
@@ -265,7 +266,7 @@ fun FixerScreen(
                 OutlinedTextField(
                     value = state.searchQuery,
                     onValueChange = onSearchChange,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().testTag("fixer_search"),
                     singleLine = true,
                     shape = RoundedCornerShape(16.dp),
                     leadingIcon = {
@@ -496,6 +497,7 @@ private fun PlaybookDiagnosticCard(
             OutlinedButton(
                 onClick = onDiagnose,
                 enabled = !item.isBusy,
+                modifier = Modifier.testTag("diagnose_${playbook.id}"),
             ) {
                 Text("Проверить")
             }
@@ -514,7 +516,7 @@ private fun PlaybookDiagnosticCard(
                 Button(
                     onClick = onFix,
                     enabled = !item.isBusy && blockedReason == null && item.verdict != DiagnosticVerdict.NOT_APPLICABLE,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).testTag("fix_${playbook.id}"),
                 ) {
                     Icon(SwagIcons.Fixer, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.size(6.dp))

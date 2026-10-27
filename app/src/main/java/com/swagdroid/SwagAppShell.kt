@@ -1,5 +1,7 @@
 package com.swagdroid
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -14,6 +16,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.swagdroid.core.designsystem.icon.SwagIcons
 import com.swagdroid.core.model.SwagTab
@@ -37,6 +40,7 @@ fun SwagAppShell() {
                 SwagTab.entries.forEach { tab ->
                     val selected = tab == currentTab
                     NavigationBarItem(
+                        modifier = Modifier.testTag("nav_${tab.name}"),
                         selected = selected,
                         onClick = { currentTab = tab },
                         icon = {
@@ -56,31 +60,33 @@ fun SwagAppShell() {
             }
         },
     ) { innerPadding ->
-        when (currentTab) {
-            SwagTab.DASHBOARD -> {
-                DashboardRoute(
-                    onNavigateToTab = { target -> currentTab = target },
-                    openVaultTrigger = vaultSheetTrigger,
-                    modifier = Modifier.padding(innerPadding),
-                )
-            }
-            SwagTab.FIXER -> {
-                FixerRoute(contentPadding = innerPadding)
-            }
-            SwagTab.OPTIMIZER -> {
-                OptimizerRoute(contentPadding = innerPadding)
-            }
-            SwagTab.CLEANER -> {
-                CleanerRoute(contentPadding = innerPadding)
-            }
-            SwagTab.SECURITY -> {
-                SecurityCenterRoute(
-                    contentPadding = innerPadding,
-                    onOpenVault = {
-                        vaultSheetTrigger++
-                        currentTab = SwagTab.DASHBOARD
-                    },
-                )
+        Box(Modifier.fillMaxSize().testTag("screen_${currentTab.name}")) {
+            when (currentTab) {
+                SwagTab.DASHBOARD -> {
+                    DashboardRoute(
+                        onNavigateToTab = { target -> currentTab = target },
+                        openVaultTrigger = vaultSheetTrigger,
+                        modifier = Modifier.padding(innerPadding),
+                    )
+                }
+                SwagTab.FIXER -> {
+                    FixerRoute(contentPadding = innerPadding)
+                }
+                SwagTab.OPTIMIZER -> {
+                    OptimizerRoute(contentPadding = innerPadding)
+                }
+                SwagTab.CLEANER -> {
+                    CleanerRoute(contentPadding = innerPadding)
+                }
+                SwagTab.SECURITY -> {
+                    SecurityCenterRoute(
+                        contentPadding = innerPadding,
+                        onOpenVault = {
+                            vaultSheetTrigger++
+                            currentTab = SwagTab.DASHBOARD
+                        },
+                    )
+                }
             }
         }
     }

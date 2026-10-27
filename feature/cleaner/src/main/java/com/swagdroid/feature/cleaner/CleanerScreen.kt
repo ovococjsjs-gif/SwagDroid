@@ -38,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -119,6 +120,7 @@ private fun CleanerScreen(
 
     LazyColumn(
         modifier = Modifier
+            .testTag("cleaner_list")
             .fillMaxSize()
             .padding(contentPadding),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
@@ -260,7 +262,7 @@ private fun CleanerScreen(
                     OutlinedButton(
                         onClick = viewModel::runScan,
                         enabled = !state.isBusy,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).testTag("cleaner_scan"),
                     ) {
                         Icon(SwagIcons.Search, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.size(6.dp))
@@ -269,7 +271,7 @@ private fun CleanerScreen(
                     Button(
                         onClick = viewModel::requestCleanupReview,
                         enabled = !state.isBusy && state.hasScannedOnce && state.hasSelectedTargets,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).testTag("cleaner_review"),
                     ) {
                         Icon(SwagIcons.Cleaner, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.size(6.dp))

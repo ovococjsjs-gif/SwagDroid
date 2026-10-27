@@ -40,8 +40,9 @@ fi
 
 echo "=== Verifying non-destructive Vault migration SQL ==="
 python3 scripts/verify-vault-migration.py || exit 1
+python3 -m unittest discover -s scripts/tests || exit 1
 
-echo "=== [1/2] Running JUnit4 Unit Tests Across All 11 Modules ==="
+echo "=== [1/3] Running JUnit4 Unit Tests Across All 11 Modules ==="
 if ! ./gradlew testDebugUnitTest --continue --stacktrace --no-daemon > /tmp/swag_test.log 2>&1; then
   emit_gradle_failure_annotations "GradleTest" /tmp/swag_test.log
   python3 scripts/summarize-junit.py --allow-empty || true
@@ -51,7 +52,7 @@ fi
 tail -n 25 /tmp/swag_test.log
 python3 scripts/summarize-junit.py || exit 1
 
-echo "=== [2/2] Assembling Debug & R8-Minified Signed Release APKs ==="
+echo "=== [2/3] Assembling Debug & R8-Minified Signed Release APKs ==="
 if ! ./gradlew assembleDebug assembleRelease --continue --stacktrace --no-daemon > /tmp/swag_build.log 2>&1; then
   emit_gradle_failure_annotations "GradleBuild" /tmp/swag_build.log
   cat /tmp/swag_build.log
@@ -61,3 +62,10 @@ tail -n 25 /tmp/swag_build.log
 
 echo "=== Built APK Artifacts ==="
 ls -lh app/build/outputs/apk/debug/*.apk app/build/outputs/apk/release/*.apk
+
+if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+  echo "=== [3/3] Android 15 emulator UI + Room smoke ==="
+  bash scripts/android-smoke.sh || exit 1
+else
+  echo "Android smoke NOT run: scripts/android-smoke.sh requires a disposable CI runner."
+fi
