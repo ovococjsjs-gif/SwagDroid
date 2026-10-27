@@ -168,12 +168,13 @@ object FixerCatalogPartB {
         FixPlaybook(
             id = "sec_accessibility_scroll_stutter_audit",
             subsystem = PhoneSubsystem.SECURITY,
-            symptomTitle = "Сторонние сервисы в «Спецвозможностях» читают содержимое экрана и вызывают микрофризы прокрутки",
-            rootCauseExplanation = "Даже один активный сторонний AccessibilityService заставляет Android строить полное дерево AccessibilityNodeInfo на каждый кадр скролла, роняя FPS в лентах и давая сервису доступ к тексту на экране.",
-            fixActionSummary = "Показывает список всех активных перехватчиков экрана и позволяет очистить лишние сервисы с точкой отката в StateVault.",
+            symptomTitle = "Проверка включённых служб специальных возможностей",
+            rootCauseExplanation = "Службы доступности могут читать экран и помогать управлять телефоном. Наличие службы не доказывает вредоносность или причину задержек; TalkBack и другие необходимые средства нельзя массово отключать.",
+            fixActionSummary = "Показывает доступный список и предлагает ручную проверку в системных настройках. Ничего не отключает.",
             searchKeywords = listOf("спецвозможности", "читает экран", "микрофризы прокрутки", "accessibility", "лаги ленты"),
-            requiredTier = PrivilegeTier.ADB_SHIZUKU,
+            requiredTier = PrivilegeTier.BASIC,
             risk = RiskLevel.ADVANCED,
+            supportsVaultRollback = false,
         ),
 
         // =========================================================================

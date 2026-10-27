@@ -261,13 +261,13 @@ fun SecurityCenterScreen(
                                     Spacer(Modifier.width(10.dp))
                                     Column {
                                         Text(
-                                            text = "Система чиста — угроз не обнаружено",
+                                            text = "В проверенных данных совпадений нет",
                                             style = MaterialTheme.typography.titleSmall,
                                             fontWeight = FontWeight.Bold,
                                             color = StatusSafe,
                                         )
                                         Text(
-                                            text = "Трояны, скрытые майнеры Monero/Stratum, оверлеи без иконок и перехватчики прокси/hosts отсутствуют.",
+                                            text = "Это ограниченная локальная проверка сигнатур и эвристик, а не подтверждение отсутствия всех угроз. Закрытые и неподдерживаемые данные могли не проверяться.",
                                             style = MaterialTheme.typography.bodySmall,
                                         )
                                     }

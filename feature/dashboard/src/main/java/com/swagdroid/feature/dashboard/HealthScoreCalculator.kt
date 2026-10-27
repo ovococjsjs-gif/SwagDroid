@@ -115,7 +115,7 @@ object HealthScoreCalculator {
         }
 
         // 5. Baseline restore point check
-        val hasActiveCheckpoint = snapshots.any { it.status == SnapshotStatus.ACTIVE }
+        val hasActiveCheckpoint = snapshots.any { it.status == SnapshotStatus.ACTIVE || it.status == SnapshotStatus.CHECKPOINT }
         if (!hasActiveCheckpoint) {
             score -= 4
             signals += HealthSignal(

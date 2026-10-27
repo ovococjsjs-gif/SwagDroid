@@ -2,12 +2,8 @@ package com.swagdroid.core.vault
 
 import com.swagdroid.core.model.PackageStateTarget
 
-/**
- * Immutable Anti-Bootloop Shield (`SystemBrickGuard`).
- *
- * Prevents ANY module (Debloater, Quarantine, Fixer, or imported JSON profiles) from ever
- * disabling or suspending boot-critical Android framework packages, package installers,
- * telephony core, privilege managers (Shizuku/Sui/Magisk/KernelSU/APatch), or SwagDroid itself.
+/** Static package exclusions, complemented by runtime role checks in the Android executor.
+ * This is not a guarantee against every OEM-specific dependency or boot failure.
  */
 object SystemBrickGuard {
 
@@ -36,6 +32,7 @@ object SystemBrickGuard {
         "com.android.shell",
         "com.android.inputmethod.latin",
         "com.swagdroid",
+        "com.swagdroid.debug",
         "moe.shizuku.privileged.api",
         "rikka.sui",
         "com.topjohnwu.magisk",

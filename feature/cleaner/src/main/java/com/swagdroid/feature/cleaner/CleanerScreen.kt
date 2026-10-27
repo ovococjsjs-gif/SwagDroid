@@ -54,6 +54,7 @@ import com.swagdroid.core.designsystem.theme.StatusSafe
 import com.swagdroid.core.designsystem.theme.StatusWarning
 import com.swagdroid.core.designsystem.theme.TierAdbColor
 import com.swagdroid.feature.cleaner.model.CleanerSubTab
+import com.swagdroid.feature.cleaner.model.CleanupReview
 import com.swagdroid.feature.cleaner.model.CredentialShieldConfig
 import com.swagdroid.feature.cleaner.model.MediaAgeFilter
 import com.swagdroid.feature.cleaner.safety.AuthAndCredentialsGuard
@@ -81,14 +82,21 @@ private fun CleanerScreen(
     val context = LocalContext.current
     var pendingReducedShield by remember { mutableStateOf<CredentialShieldConfig?>(null) }
 
+    (state.cleanupReview as? CleanupReview.Awaiting)?.let { review ->
+        CleanupReviewDialog(review.plan, viewModel::dismissCleanupReview, viewModel::confirmCleanup)
+    }
+    state.lastCleanupResult?.let { result ->
+        CleanupResultDialog(result, viewModel::dismissCleanupResult)
+    }
+
     if (pendingReducedShield != null) {
         AlertDialog(
             onDismissRequest = { pendingReducedShield = null },
             title = { Text("Ослабить защиту кэша браузеров / менеджеров?") },
             text = {
                 Text(
-                    "По умолчанию SwagDroid полностью обходит стороной все менеджеры паролей, 2FA-генераторы и браузеры.\n\n" +
-                        "Даже при ослаблении этого фильтра аппаратный Контур 1 всё равно НИКОГДА не удалит базы паролей, Cookies, формы автозаполнения (Web Data), tgnet.dat и pm clear.",
+                    "По умолчанию включены исключения известных менеджеров паролей, 2FA-приложений и браузеров.\n\n" +
+                        "Базовые запреты путей останутся, но фильтры не распознают все важные данные. Ослабление исключений увеличивает риск потери файлов.",
                 )
             },
             confirmButton = {
@@ -103,7 +111,7 @@ private fun CleanerScreen(
             },
             dismissButton = {
                 Button(onClick = { pendingReducedShield = null }) {
-                    Text("Оставить 100% защиту")
+                    Text("Оставить исключения")
                 }
             },
         )
@@ -129,7 +137,7 @@ private fun CleanerScreen(
                         style = MaterialTheme.typography.headlineMedium,
                     )
                     Text(
-                        text = "Архитектура SD Maid SE · Сейф мессенджеров · 0% риска для аккаунтов",
+                        text = "Сначала проверка списка, затем удаление без корзины",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -161,15 +169,15 @@ private fun CleanerScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = if (state.isFullShieldActive) {
-                                "Броня паролей, автозаполнения и аккаунтов: ВКЛ (по умолчанию)"
+                                "Исключения для важных данных: включены"
                             } else {
-                                "Броня паролей: Контур 1 активен (пользовательский фильтр изменён)"
+                                "Часть исключений для важных данных отключена"
                             },
                             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                             color = shieldAccent,
                         )
                         Text(
-                            text = "Логины, Cookies, 2FA, формы автозаполнения и чаты неприкосновенны",
+                            text = "Фильтры известных путей не заменяют резервную копию",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -193,7 +201,7 @@ private fun CleanerScreen(
                         style = MaterialTheme.typography.titleMedium,
                     )
                     Text(
-                        text = "На Android 11–16 для сканирования папок удалённых игр, Telegram/WhatsApp и дубликатов выдайте штатное разрешение управления файлами.",
+                        text = "Разрешение расширяет доступ к общим файлам, но не открывает все чужие Android/data. Shizuku не меняет права этого файлового сканера.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -225,7 +233,7 @@ private fun CleanerScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "К безопасному освобождению:",
+                            text = "Выбрано во всех разделах (оценка):",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -237,8 +245,12 @@ private fun CleanerScreen(
                     }
                 }
 
-                if (state.isScanning || state.isCleaning) {
+                if (state.isBusy) {
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+                if (state.isPreparingCleanup) {
+                    Text("Подготовка списка и проверка содержимого файлов… Ничего не удаляется.")
+                    TextButton(onClick = viewModel::cancelCleanupPreparation) { Text("Отменить подготовку") }
                 }
 
                 Row(
@@ -247,7 +259,7 @@ private fun CleanerScreen(
                 ) {
                     OutlinedButton(
                         onClick = viewModel::runScan,
-                        enabled = !state.isScanning && !state.isCleaning,
+                        enabled = !state.isBusy,
                         modifier = Modifier.weight(1f),
                     ) {
                         Icon(SwagIcons.Search, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -255,13 +267,13 @@ private fun CleanerScreen(
                         Text(if (state.isScanning) "Сканирование…" else "Сканировать")
                     }
                     Button(
-                        onClick = viewModel::cleanAllSelected,
-                        enabled = !state.isScanning && !state.isCleaning && state.hasScannedOnce,
+                        onClick = viewModel::requestCleanupReview,
+                        enabled = !state.isBusy && state.hasScannedOnce && state.hasSelectedTargets,
                         modifier = Modifier.weight(1f),
                     ) {
                         Icon(SwagIcons.Cleaner, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.size(6.dp))
-                        Text(if (state.isCleaning) "Очистка…" else "Очистить")
+                        Text(if (state.isCleaning) "Удаление…" else "Просмотреть план")
                     }
                 }
             }
@@ -319,15 +331,15 @@ private fun CleanerScreen(
             CleanerSubTab.SYSTEM_CACHE -> {
                 if (!state.hasScannedOnce) {
                     item {
-                        EmptyHintCard("Нажмите «Сканировать», чтобы проверить кэши приложений, логи, временные файлы и пустые папки без затрагивания аккаунтов.")
+                        EmptyHintCard("Нажмите «Сканировать», чтобы найти доступные файлы. Удаление потребует отдельного просмотра и подтверждения плана.")
                     }
                 } else if (state.junkGroups.isEmpty()) {
                     item {
-                        EmptyHintCard("Идеально чисто! Лишних временных кэшей и системного мусора не обнаружено.")
+                        EmptyHintCard("В доступных для сканирования папках кандидаты не найдены. Это не проверка всего хранилища.")
                     }
                 } else {
                     items(state.junkGroups, key = { it.category.name }) { grp ->
-                        SwagCard(onClick = { viewModel.toggleJunkCategory(grp.category) }) {
+                        SwagCard(onClick = if (!state.isBusy && grp.category.cleanupBlockReason == null) ({ viewModel.toggleJunkCategory(grp.category) }) else null) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -336,6 +348,7 @@ private fun CleanerScreen(
                                 Checkbox(
                                     checked = grp.isSelected,
                                     onCheckedChange = { viewModel.toggleJunkCategory(grp.category) },
+                                    enabled = !state.isBusy && grp.category.cleanupBlockReason == null,
                                 )
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(grp.category.titleRu, style = MaterialTheme.typography.titleMedium)
@@ -344,6 +357,9 @@ private fun CleanerScreen(
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
+                                    grp.category.cleanupBlockReason?.let {
+                                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                                    }
                                 }
                                 Column(horizontalAlignment = Alignment.End) {
                                     Text(
@@ -365,9 +381,9 @@ private fun CleanerScreen(
             CleanerSubTab.MESSENGERS -> {
                 item {
                     SwagCard {
-                        Text("Бережный Сейф Мессенджеров", style = MaterialTheme.typography.titleMedium)
+                        Text("Файлы мессенджеров", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Чистит ТОЛЬКО просмотренный медиа-кэш (кружочки, видеоленту, стикеры, дубли Sent). Ключи входа (tgnet.dat), переписки и базы чатов защищены на уровне ядра.",
+                            "Включает сохранённые фото, видео, аудио и файлы Sent — не только кэш. Ничего не выбрано автоматически. Проверьте файлы и резервную копию перед удалением.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -381,6 +397,7 @@ private fun CleanerScreen(
                                 FilterChip(
                                     selected = state.ageFilter == af,
                                     onClick = { viewModel.setMediaAgeFilter(af) },
+                                    enabled = !state.isBusy,
                                     label = { Text(af.labelRu) },
                                 )
                             }
@@ -390,11 +407,11 @@ private fun CleanerScreen(
 
                 if (state.messengerShelves.isEmpty()) {
                     item {
-                        EmptyHintCard("Тяжёлых медиа-кэшей мессенджеров по выбранному фильтру возраста не найдено.")
+                        EmptyHintCard("В доступных папках по выбранному возрасту файлы не найдены. Закрытые Android/data могли быть пропущены.")
                     }
                 } else {
                     items(state.messengerShelves, key = { it.id }) { shelf ->
-                        SwagCard(onClick = { viewModel.toggleMessengerShelf(shelf.id) }) {
+                        SwagCard(onClick = if (!state.isBusy) ({ viewModel.toggleMessengerShelf(shelf.id) }) else null) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -403,6 +420,7 @@ private fun CleanerScreen(
                                 Checkbox(
                                     checked = shelf.isSelected,
                                     onCheckedChange = { viewModel.toggleMessengerShelf(shelf.id) },
+                                    enabled = !state.isBusy,
                                 )
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
@@ -430,13 +448,14 @@ private fun CleanerScreen(
             // TAB 3: CORPSEFINDER (ORPHANED UNINSTALLED APP FOLDERS)
             // =================================================================
             CleanerSubTab.CORPSES -> {
+                item { EmptyHintCard("Отсутствие приложения не доказывает, что папка не нужна: в ней могут остаться ваши файлы. Ничего не выбрано автоматически.") }
                 if (state.corpses.isEmpty()) {
                     item {
-                        EmptyHintCard("Сиротских папок от давно удалённых игр и программ в Android/data, obb и media не обнаружено.")
+                        EmptyHintCard("Среди доступных папок кандидаты в остатки приложений не найдены.")
                     }
                 } else {
                     items(state.corpses, key = { it.id }) { corpse ->
-                        SwagCard(onClick = { viewModel.toggleCorpse(corpse.id) }) {
+                        SwagCard(onClick = if (!state.isBusy) ({ viewModel.toggleCorpse(corpse.id) }) else null) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -445,6 +464,7 @@ private fun CleanerScreen(
                                 Checkbox(
                                     checked = corpse.isSelected,
                                     onCheckedChange = { viewModel.toggleCorpse(corpse.id) },
+                                    enabled = !state.isBusy,
                                 )
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(corpse.packageName, style = MaterialTheme.typography.titleMedium)
@@ -474,13 +494,14 @@ private fun CleanerScreen(
             // TAB 4: DEDUPLICATOR (SHA-256 EXACT + 64-BIT PERCEPTUAL dHASH)
             // =================================================================
             CleanerSubTab.DUPLICATES -> {
+                item { EmptyHintCard("Похожие кадры не равны точным копиям. Перед удалением проверьте список; сохраняемые оригиналы исключаются из очистки всех разделов.") }
                 if (state.duplicateClusters.isEmpty()) {
                     item {
-                        EmptyHintCard("Дублирующихся файлов (SHA-256) и лишних серийных кадров (dHash) не найдено.")
+                        EmptyHintCard("В проверенной части доступных файлов дубликаты и похожие кадры не найдены.")
                     }
                 } else {
                     items(state.duplicateClusters, key = { it.id }) { cluster ->
-                        SwagCard(onClick = { viewModel.toggleDuplicateCluster(cluster.id) }) {
+                        SwagCard(onClick = if (!state.isBusy) ({ viewModel.toggleDuplicateCluster(cluster.id) }) else null) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -489,16 +510,17 @@ private fun CleanerScreen(
                                 Checkbox(
                                     checked = cluster.isSelected,
                                     onCheckedChange = { viewModel.toggleDuplicateCluster(cluster.id) },
+                                    enabled = !state.isBusy,
                                 )
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(cluster.kind.labelRu, style = MaterialTheme.typography.titleMedium)
                                     Text(
-                                        text = "Останется оригинал: ${cluster.keptOriginalPath.substringAfterLast('/')}",
+                                        text = "Сохраняемый файл: ${cluster.keptOriginalPath.substringAfterLast('/')}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = StatusSafe,
                                     )
                                     Text(
-                                        text = "К удалению копий (${cluster.duplicatePaths.size}): ${cluster.duplicatePaths.joinToString { it.substringAfterLast('/') }}",
+                                        text = "Кандидаты на удаление (${cluster.duplicatePaths.size}): ${cluster.duplicatePaths.joinToString { it.substringAfterLast('/') }}",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -521,11 +543,11 @@ private fun CleanerScreen(
                 item {
                     SwagSectionCard(
                         title = "Двухконтурная Броня Паролей и Аккаунтов",
-                        subtitle = "Включена по умолчанию, чтобы очистка никогда не приводила к выходу из аккаунтов",
+                        subtitle = "Исключения известных путей и приложений. Не гарантируют сохранность всех важных данных",
                         icon = SwagIcons.Shield,
                     ) {
                         Text(
-                            text = "Контур 1 (Неотключаемый инвариант ядра): SwagDroid физически запрещает вызов pm clear и удаление баз accounts_ce.db, Keystore, shared_prefs, databases, Cookies, Login Data, форм автозаполнения Web Data и ключей сессий tgnet.dat / msgstore.db.",
+                            text = "Базовый фильтр исключает известные пути accounts_ce.db, Keystore, shared_prefs, databases, Cookies, Login Data, Web Data, tgnet.dat и msgstore.db. Неизвестные форматы и расположения он может не распознать.",
                             style = MaterialTheme.typography.bodySmall,
                             color = StatusSafe,
                         )
@@ -535,6 +557,7 @@ private fun CleanerScreen(
                             title = "Защищать системное автозаполнение и учётные записи",
                             subtitle = "Обходит активный сервис Autofill, KeyChain и CredentialManager (по умолчанию ВКЛ)",
                             checked = state.shieldConfig.protectAccountsAndAutofill,
+                            enabled = !state.isBusy,
                             onToggle = { next ->
                                 val updated = state.shieldConfig.copy(protectAccountsAndAutofill = next)
                                 if (!next) pendingReducedShield = updated else viewModel.updateShieldConfig(updated)
@@ -546,6 +569,7 @@ private fun CleanerScreen(
                             title = "Не трогать менеджеры паролей, 2FA и платёжные кошельки",
                             subtitle = "Защищено пакетов по умолчанию: ${AuthAndCredentialsGuard.PASSWORD_AND_2FA_PACKAGES.size} (Google Password Manager, Bitwarden, KeePass, Proton Pass, Google/Yandex Authenticator, Mir Pay…)",
                             checked = state.shieldConfig.protectPasswordManagersAnd2Fa,
+                            enabled = !state.isBusy,
                             onToggle = { next ->
                                 val updated = state.shieldConfig.copy(protectPasswordManagersAnd2Fa = next)
                                 if (!next) pendingReducedShield = updated else viewModel.updateShieldConfig(updated)
@@ -555,8 +579,9 @@ private fun CleanerScreen(
 
                         ShieldToggleRow(
                             title = "Не трогать кэши браузеров и WebView-сессий",
-                            subtitle = "Защищено браузеров: ${AuthAndCredentialsGuard.BROWSER_AND_WEBVIEW_PACKAGES.size} (Chrome, Яндекс Браузер, Firefox, Brave, Opera, Samsung Internet…) — сайты и формы не разлогинятся",
+                            subtitle = "Защищено браузеров: ${AuthAndCredentialsGuard.BROWSER_AND_WEBVIEW_PACKAGES.size} (Chrome, Яндекс Браузер, Firefox, Brave, Opera, Samsung Internet…) — их известные каталоги исключаются",
                             checked = state.shieldConfig.protectBrowsersAndWebViewSessions,
+                            enabled = !state.isBusy,
                             onToggle = { next ->
                                 val updated = state.shieldConfig.copy(protectBrowsersAndWebViewSessions = next)
                                 if (!next) pendingReducedShield = updated else viewModel.updateShieldConfig(updated)
@@ -566,8 +591,9 @@ private fun CleanerScreen(
 
                         ShieldToggleRow(
                             title = "Защищать файлы сейфов и резервных кодов (.kdbx, .2fas, .aegis)",
-                            subtitle = "Исключает любые базы паролей, сертификаты .p12/.pfx и конфиги VPN в Загрузках",
+                            subtitle = "Исключает известные расширения баз паролей, сертификатов и конфигураций VPN",
                             checked = state.shieldConfig.protectVaultAnd2FaBackupFiles,
+                            enabled = !state.isBusy,
                             onToggle = { next ->
                                 val updated = state.shieldConfig.copy(protectVaultAnd2FaBackupFiles = next)
                                 if (!next) pendingReducedShield = updated else viewModel.updateShieldConfig(updated)
@@ -577,9 +603,10 @@ private fun CleanerScreen(
                         if (!state.isFullShieldActive) {
                             Button(
                                 onClick = viewModel::resetShieldToFullDefault,
+                                enabled = !state.isBusy,
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
-                                Text("Вернуть 100% защиту по умолчанию")
+                                Text("Включить все исключения")
                             }
                         }
                     }
@@ -593,7 +620,7 @@ private fun CleanerScreen(
                             style = MaterialTheme.typography.titleMedium,
                         )
                         Text(
-                            text = "Принудительное убийство фоновых процессов выгружает службу автозаполнения паролей, сбивает пуши мессенджеров и заставляет процессор тратить в 3 раза больше заряда батареи на повторный холодный запуск библиотек. Вместо этого используйте честный ядерный «Cached Apps Freezer» на вкладке Оптимизатор.",
+                            text = "Принудительная остановка фоновых процессов может нарушить уведомления и работу автозаполнения. Повторный запуск приложений тоже расходует ресурсы; универсального ускорения такая очистка не гарантирует.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -609,6 +636,7 @@ private fun ShieldToggleRow(
     title: String,
     subtitle: String,
     checked: Boolean,
+    enabled: Boolean,
     onToggle: (Boolean) -> Unit,
 ) {
     Row(
@@ -620,7 +648,7 @@ private fun ShieldToggleRow(
             Text(title, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Switch(checked = checked, onCheckedChange = onToggle)
+        Switch(checked = checked, onCheckedChange = onToggle, enabled = enabled)
     }
 }
 

@@ -55,14 +55,25 @@ data class PrivilegeState(
     val lastCheckEpochMs: Long = 0L,
 )
 
+enum class CommandCompletion {
+    /** The command process exited normally; the exit code still needs checking. */
+    EXITED,
+    /** No user command was dispatched. */
+    NOT_STARTED,
+    /** Timeout, cancellation or lost transport: side effects / child processes may remain. */
+    UNKNOWN,
+}
+
 data class ShellExecResult(
     val command: String,
     val exitCode: Int,
     val stdout: List<String>,
     val stderr: List<String>,
     val executedAtTier: PrivilegeTier,
+    val completion: CommandCompletion = CommandCompletion.EXITED,
+    val outputTruncated: Boolean = false,
 ) {
-    val isSuccess: Boolean get() = exitCode == 0
+    val isSuccess: Boolean get() = completion == CommandCompletion.EXITED && exitCode == 0
     val stdoutText: String get() = stdout.joinToString("\n").trim()
     val stderrText: String get() = stderr.joinToString("\n").trim()
 }

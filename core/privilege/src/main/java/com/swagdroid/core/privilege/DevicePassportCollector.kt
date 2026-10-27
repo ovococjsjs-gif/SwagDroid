@@ -73,8 +73,8 @@ class DevicePassportCollector @Inject constructor(
             .takeIf { it != Long.MIN_VALUE }
 
         val dumpsysExtras = if (executor.currentTier() != PrivilegeTier.BASIC) {
-            val res = executor.execute("dumpsys battery")
-            if (res.isSuccess) DumpsysAndKernelParsers.parseDumpsysBattery(res.stdout)
+            val res = executor.query(SystemReadQuery.Fixed.BATTERY)
+            if (res.isSuccess && !res.outputTruncated) DumpsysAndKernelParsers.parseDumpsysBattery(res.stdout)
             else DumpsysBatteryExtras()
         } else {
             DumpsysBatteryExtras()
@@ -182,7 +182,7 @@ class DevicePassportCollector @Inject constructor(
         val vbState = readSystemProp("ro.boot.verifiedbootstate").ifBlank { "unknown" }
         val knoxBit = readSystemProp("ro.boot.warranty_bit").ifBlank { null }
 
-        val selinuxRes = executor.execute("getenforce")
+        val selinuxRes = executor.query(SystemReadQuery.Fixed.SELINUX)
         val selinuxEnforcing = when (selinuxRes.stdoutText.lowercase()) {
             "enforcing" -> true
             "permissive" -> false
@@ -233,8 +233,8 @@ class DevicePassportCollector @Inject constructor(
         }.getOrDefault("")
         if (viaClass.isNotBlank()) return viaClass.trim()
 
-        val res = executor.execute("getprop ${DumpsysAndKernelParsers.shellQuote(propName)}")
-        return if (res.isSuccess) res.stdoutText else ""
+        val res = executor.query(SystemReadQuery.Property(propName))
+        return if (res.isSuccess && !res.outputTruncated) res.stdoutText else ""
     }
 
     private data class BrandAdviceQuad(

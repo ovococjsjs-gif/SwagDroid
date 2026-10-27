@@ -9,6 +9,11 @@ import android.os.Environment
 import com.swagdroid.core.model.PrivilegeTier
 import com.swagdroid.core.model.SettingNamespace
 import com.swagdroid.core.privilege.PrivilegedCommandExecutor
+import com.swagdroid.core.privilege.SystemReadQuery
+import com.swagdroid.feature.cleaner.model.CleanupExecutionResult
+import com.swagdroid.feature.cleaner.model.CleanupReview
+import com.swagdroid.feature.cleaner.model.CleanupSelection
+import com.swagdroid.feature.cleaner.model.PreparedCleanupPlan
 import com.swagdroid.feature.cleaner.model.CorpseFinding
 import com.swagdroid.feature.cleaner.model.CredentialShieldConfig
 import com.swagdroid.feature.cleaner.model.DuplicateCluster
@@ -20,8 +25,13 @@ import com.swagdroid.feature.cleaner.model.MessengerShelfKind
 import com.swagdroid.feature.cleaner.model.SystemJunkCategory
 import com.swagdroid.feature.cleaner.model.SystemJunkGroup
 import com.swagdroid.feature.cleaner.safety.AuthAndCredentialsGuard
+import com.swagdroid.feature.cleaner.safety.FileCleanupPlanner
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.RandomAccessFile
@@ -42,6 +52,8 @@ class CleanerScanAndPurgeEngine @Inject constructor(
     @ApplicationContext private val context: Context,
     private val executor: PrivilegedCommandExecutor,
 ) {
+    // ViewModels may belong to different activities/windows; serialize deletion app-wide too.
+    private val cleanupMutex = Mutex()
 
     fun hasFullStoragePermission(): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -115,7 +127,7 @@ class CleanerScanAndPurgeEngine @Inject constructor(
 
         // 1B. Privileged internal caches via dumpsys diskstats (never touches user/login data!)
         if (executor.currentTier().satisfies(PrivilegeTier.ADB_SHIZUKU)) {
-            val diskOut = executor.execute("dumpsys diskstats").stdoutText
+            val diskOut = executor.query(SystemReadQuery.Fixed.DISK_STATS).stdoutText
             val estInternalCache = parseDiskstatsAppCacheBytes(diskOut)
             if (estInternalCache > 0L) {
                 groups.add(
@@ -222,7 +234,7 @@ class CleanerScanAndPurgeEngine @Inject constructor(
 
         // 1D. Abandoned PackageInstaller staging sessions
         if (executor.currentTier().satisfies(PrivilegeTier.ADB_SHIZUKU)) {
-            val stg = executor.execute("pm list staging-sessions").stdoutText
+            val stg = executor.query(SystemReadQuery.Fixed.STAGING_SESSIONS).stdoutText
             val sessionIds = Regex("\\bsessionId\\s*=\\s*(\\d+)|^\\s*(\\d+)\\s*:", RegexOption.MULTILINE)
                 .findAll(stg)
                 .mapNotNull { m -> m.groupValues[1].ifEmpty { m.groupValues[2] }.takeIf { it.isNotEmpty() } }
@@ -496,7 +508,7 @@ class CleanerScanAndPurgeEngine @Inject constructor(
                             keptOriginalPath = original.absolutePath,
                             duplicatePaths = copies.map { it.absolutePath },
                             reclaimableBytes = reclaimBytes,
-                            isSelected = true,
+                            isSelected = false,
                         ),
                     )
                 }
@@ -551,87 +563,34 @@ class CleanerScanAndPurgeEngine @Inject constructor(
     }
 
     // =========================================================================
-    // Double-Gated Safe Execution
+    // Reviewed, finite file cleanup. Shell-wide cleanup is intentionally unavailable here.
     // =========================================================================
 
-    suspend fun purgeTargets(
-        filePathsToDelete: List<String>,
+    suspend fun prepareCleanup(
+        selection: CleanupSelection,
         shield: CredentialShieldConfig,
-    ): Pair<Int, Long> = withContext(Dispatchers.IO) {
-        val activeAutofillPkg = executor.readSetting(SettingNamespace.SECURE, "autofill_service")
-            ?.substringBefore('/')
-
-        var deletedItems = 0
-        var freedBytes = 0L
-
-        for (target in filePathsToDelete) {
-            when {
-                target == "::PRIVILEGED_TRIM_CACHES::" -> {
-                    val cmd = "pm trim-caches 999999999999999999"
-                    if (AuthAndCredentialsGuard.isShellCommandSafeForAccounts(cmd)) {
-                        if (executor.execute(cmd).isSuccess) {
-                            deletedItems++
-                        }
-                    }
-                }
-                target.startsWith("::STAGING_SESSION::") -> {
-                    val sessionId = target.removePrefix("::STAGING_SESSION::").trim()
-                    if (sessionId.all { it.isDigit() }) {
-                        val cmd = "pm install-abandon $sessionId"
-                        if (AuthAndCredentialsGuard.isShellCommandSafeForAccounts(cmd)) {
-                            if (executor.execute(cmd).isSuccess) deletedItems++
-                        }
-                    }
-                }
-                else -> {
-                    // Mandatory second-pass check through AuthAndCredentialsGuard right before delete!
-                    if (!AuthAndCredentialsGuard.isPathSafeToClean(target, shield, null, activeAutofillPkg)) {
-                        continue
-                    }
-                    val f = File(target)
-                    if (!f.exists()) continue
-                    val (cnt, bytes) = deleteRecursivelySafe(f, shield, activeAutofillPkg)
-                    deletedItems += cnt
-                    freedBytes += bytes
-                }
-            }
-        }
-
-        deletedItems to freedBytes
+    ): PreparedCleanupPlan = withContext(Dispatchers.IO) {
+        filePlanner(shield).prepare(selection)
     }
 
-    private fun deleteRecursivelySafe(
-        file: File,
+    suspend fun executeCleanup(
+        approval: CleanupReview.Approved,
         shield: CredentialShieldConfig,
-        activeAutofillPkg: String?,
-    ): Pair<Int, Long> {
-        val isSymlink = runCatching { java.nio.file.Files.isSymbolicLink(file.toPath()) }.getOrDefault(false)
-        if (isSymlink) {
-            // Never traverse symbolic links during deletion (blocks TOCTOU symlink escape attacks)
-            return 0 to 0L
-        }
-        val canonical = runCatching { file.canonicalPath }.getOrNull() ?: return 0 to 0L
-        if (!AuthAndCredentialsGuard.isPathSafeToClean(file.absolutePath, shield, null, activeAutofillPkg) ||
-            !AuthAndCredentialsGuard.isPathSafeToClean(canonical, shield, null, activeAutofillPkg)
-        ) {
-            return 0 to 0L
-        }
-        if (file.isDirectory) {
-            var count = 0
-            var bytes = 0L
-            file.listFiles()?.forEach { child ->
-                val (c, b) = deleteRecursivelySafe(child, shield, activeAutofillPkg)
-                count += c
-                bytes += b
-            }
-            if (file.list()?.isEmpty() == true && file.delete()) {
-                count++
-            }
-            return count to bytes
-        } else {
-            val size = file.length()
-            return if (file.delete()) 1 to size else 0 to 0L
-        }
+    ): CleanupExecutionResult = withContext(Dispatchers.IO) {
+        cleanupMutex.withLock { filePlanner(shield).execute(approval) }
+    }
+
+    private suspend fun filePlanner(shield: CredentialShieldConfig): FileCleanupPlanner {
+        val activeAutofillPkg = executor.readSetting(SettingNamespace.SECURE, "autofill_service")
+            ?.substringBefore('/')
+        val jobContext = currentCoroutineContext()
+        return FileCleanupPlanner(
+            storageRoot = Environment.getExternalStorageDirectory(),
+            isPathAllowed = { path ->
+                AuthAndCredentialsGuard.isPathSafeToClean(path, shield, null, activeAutofillPkg)
+            },
+            checkCancellation = { jobContext.ensureActive() },
+        )
     }
 
     private fun measureDirSafe(

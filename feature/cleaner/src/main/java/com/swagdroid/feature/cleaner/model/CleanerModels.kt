@@ -18,15 +18,15 @@ enum class SystemJunkCategory(
 ) {
     PUBLIC_APP_CACHES(
         titleRu = "Внешние кэши приложений",
-        subtitleRu = "Временные буферы и шейдеры в Android/data/*/cache (без сброса авторизаций)",
+        subtitleRu = "Доступные файлы Android/data/*/cache. Перед удалением проверьте список",
         defaultChecked = true,
         risk = RiskLevel.SAFE,
     ),
     PRIVILEGED_TRIM_CACHES(
         titleRu = "Внутренние кэши всех приложений (ADB / Root)",
-        subtitleRu = "Штатный системный вызов pm trim-caches — освобождает кэши без выхода из аккаунтов",
-        defaultChecked = true,
-        risk = RiskLevel.SAFE,
+        subtitleRu = "Только оценка объёма: глобальное удаление пока отключено",
+        defaultChecked = false,
+        risk = RiskLevel.ADVANCED,
     ),
     TEMP_AND_INCOMPLETE(
         titleRu = "Временные файлы и обрывки загрузок",
@@ -42,7 +42,7 @@ enum class SystemJunkCategory(
     ),
     BROKEN_THUMBNAILS(
         titleRu = "Раздутый кэш миниатюр Галереи (.thumbnails)",
-        subtitleRu = "Эскизы давно удалённых картинок (оригиналы фотографий не затрагиваются)",
+        subtitleRu = "Содержимое папок .thumbnails; актуальность миниатюр не проверяется",
         defaultChecked = true,
         risk = RiskLevel.SAFE,
     ),
@@ -53,10 +53,10 @@ enum class SystemJunkCategory(
         risk = RiskLevel.SAFE,
     ),
     ABANDONED_STAGING_SESSIONS(
-        titleRu = "Зависшие сессии установщика игр/APK",
-        subtitleRu = "Брошенные временные контейнеры PackageInstaller (ADB / Root)",
-        defaultChecked = true,
-        risk = RiskLevel.SAFE,
+        titleRu = "Сессии установщика игр/APK · только просмотр",
+        subtitleRu = "Наличие сессии не доказывает, что установка брошена",
+        defaultChecked = false,
+        risk = RiskLevel.ADVANCED,
     ),
     EMPTY_FOLDERS(
         titleRu = "Пустые папки-пустышки",
@@ -69,7 +69,14 @@ enum class SystemJunkCategory(
         subtitleRu = "По умолчанию НЕ отмечено — включайте, только если инсталляторы больше не нужны",
         defaultChecked = false,
         risk = RiskLevel.ADVANCED,
-    ),
+    );
+
+    val cleanupBlockReason: String?
+        get() = when (this) {
+            PRIVILEGED_TRIM_CACHES -> "Временно недоступно: глобальная очистка не соблюдает исключения отдельных приложений."
+            ABANDONED_STAGING_SESSIONS -> "Автоматическая отмена отключена: среди сессий могут быть действующие установки."
+            else -> null
+        }
 }
 
 data class SystemJunkGroup(
@@ -77,7 +84,7 @@ data class SystemJunkGroup(
     val bytesCount: Long,
     val itemsCount: Int,
     val targetPaths: List<String>,
-    val isSelected: Boolean = category.defaultChecked,
+    val isSelected: Boolean = category.defaultChecked && category.cleanupBlockReason == null,
 )
 
 enum class MessengerBrand(val titleRu: String) {
@@ -94,34 +101,34 @@ enum class MessengerShelfKind(
     val defaultChecked: Boolean,
 ) {
     VIDEO_AND_CIRCLES(
-        titleRu = "Кэш просмотренных видео и видеокружочков",
-        subtitleRu = "Самый тяжёлый раздел кэша; в облачных чатах ролики всегда остаются на сервере",
-        defaultChecked = true,
+        titleRu = "Видео и видеосообщения",
+        subtitleRu = "Могут включать сохранённые видео; наличие копии в облаке не проверено",
+        defaultChecked = false,
     ),
     IMAGE_FEED_CACHE(
-        titleRu = "Кэш ленты, каналов и предпросмотров",
-        subtitleRu = "Временные копии просмотренных постов без удаления сохранённых в Галерею фото",
-        defaultChecked = true,
+        titleRu = "Изображения и предпросмотры",
+        subtitleRu = "Могут включать сохранённые фото, а не только временный кэш",
+        defaultChecked = false,
     ),
     STICKERS_AND_GIFS(
-        titleRu = "Кэш стикеров, эмодзи и GIF-анимаций",
-        subtitleRu = "Мгновенно подгружаются заново при открытии чата",
-        defaultChecked = true,
+        titleRu = "Стикеры и GIF-анимации",
+        subtitleRu = "Возможность повторной загрузки приложением не проверена",
+        defaultChecked = false,
     ),
     SENT_DUPLICATES(
-        titleRu = "Дубли отправленных медиа (папки Sent)",
-        subtitleRu = "Вторые копии фото/видео, которые уже лежат в вашей основной камере",
+        titleRu = "Отправленные медиа (папки Sent)",
+        subtitleRu = "Файлы не проверены на наличие другой копии. Это могут быть единственные экземпляры",
         defaultChecked = false,
     ),
     VOICE_NOTES_CACHE(
-        titleRu = "Голосовые сообщения и аудиокэш",
-        subtitleRu = "По умолчанию НЕ отмечено для защиты локальных голосовых заметок",
+        titleRu = "Голосовые сообщения и аудио",
+        subtitleRu = "Могут включать локальные записи, которые нельзя восстановить",
         defaultChecked = false,
     ),
 }
 
 enum class MediaAgeFilter(val daysThreshold: Int, val labelRu: String) {
-    ANY_AGE(0, "Все файлы кэша"),
+    ANY_AGE(0, "Любой возраст файлов"),
     OLDER_THAN_7_DAYS(7, "Старше 7 дней"),
     OLDER_THAN_30_DAYS(30, "Старше 30 дней"),
 }
@@ -143,7 +150,7 @@ data class CorpseFinding(
     val locationLabelRu: String,
     val bytesCount: Long,
     val filesCount: Int,
-    val isSelected: Boolean = true,
+    val isSelected: Boolean = false,
 )
 
 enum class DuplicateMatchKind(val labelRu: String) {
@@ -157,12 +164,12 @@ data class DuplicateCluster(
     val keptOriginalPath: String,
     val duplicatePaths: List<String>,
     val reclaimableBytes: Long,
-    val isSelected: Boolean = (kind == DuplicateMatchKind.EXACT_SHA256),
+    val isSelected: Boolean = false,
 )
 
 /**
- * Multi-layer shield guaranteeing that accounts, passwords, autofill databases, passkeys,
- * 2FA authenticators, browser cookies/sessions, and password backup vaults are NEVER wiped.
+ * Additional exclusion filters for known credential paths and packages.
+ * These heuristics are not a guarantee that every valuable file will be recognized.
  *
  * ALL flags are ENABLED (`true`) BY DEFAULT per explicit product safety design.
  */

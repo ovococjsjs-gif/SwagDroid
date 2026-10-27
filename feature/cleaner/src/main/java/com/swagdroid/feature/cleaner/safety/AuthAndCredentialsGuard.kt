@@ -3,16 +3,9 @@ package com.swagdroid.feature.cleaner.safety
 import com.swagdroid.feature.cleaner.model.CredentialShieldConfig
 
 /**
- * Two-contour safety engine ensuring SwagDroid Cleaner NEVER deletes passwords, accounts,
- * autofill form data, passkeys, 2FA seeds, messenger auth keys, or browser login cookies.
- *
- * - **Contour 1 (Hard Architectural Invariant)**: Unconditionally blocks `pm clear`, system
- *   account DBs (`accounts_ce.db`), hardware keystore, `shared_prefs`, `databases`, `Cookies`,
- *   `Login Data`, `Web Data` (HTML autofill!), `Local Storage`, `tgnet.dat`, `msgstore.db`, etc.
- *   Even if a user turns off every UI switch, Contour 1 NEVER allows wiping auth state.
- * - **Contour 2 (Default-ON User Shield [CredentialShieldConfig])**: Enabled by default (`true`)
- *   to completely skip password managers, autofill providers, 2FA authenticators, browsers,
- *   payment wallets, and `.kdbx` / `.2fas` / `.aegis` backup vaults across the entire phone.
+ * Additional deny-lists for known account/credential paths and sensitive packages.
+ * Passing these checks does not prove that a file is expendable or recoverable.
+ * Final cleanup still requires a reviewed plan and an explicit irreversible-deletion consent.
  */
 object AuthAndCredentialsGuard {
 
@@ -144,8 +137,7 @@ object AuthAndCredentialsGuard {
     }
 
     /**
-     * Master gate: returns `true` ONLY if [rawPath] (and optional [packageOwner]) is 100% safe
-     * to clean without risking any account logout, password loss, autofill wipe, or 2FA loss.
+     * Returns false for known protected paths/packages. A true result is NOT a safety guarantee.
      */
     fun isPathSafeToClean(
         rawPath: String,

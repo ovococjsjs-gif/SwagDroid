@@ -17,6 +17,7 @@ import com.swagdroid.core.vault.StateVaultManager
 import com.swagdroid.core.vault.VaultMutationSpec
 import com.swagdroid.core.vault.VaultTransactionResult
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -68,7 +69,7 @@ class DashboardViewModel @Inject constructor(
                 snapshots = snapshots,
             )
         }
-        val activeCount = snapshots.count { it.status == SnapshotStatus.ACTIVE }
+        val activeCount = snapshots.count { it.status.canAttemptRollback }
         DashboardUiState(
             isLoading = passport == null,
             privilege = privilege,
@@ -90,7 +91,7 @@ class DashboardViewModel @Inject constructor(
     }
 
     fun refreshAll() {
-        viewModelScope.launch {
+        launchSafely {
             privilegeManager.refreshPrivilegeState(requestRootPopup = false)
             passportFlow.value = passportCollector.collect()
         }
@@ -110,7 +111,7 @@ class DashboardViewModel @Inject constructor(
 
     fun requestShizukuPermission() {
         privilegeManager.requestShizukuPermission { granted ->
-            viewModelScope.launch {
+            launchSafely {
                 passportFlow.value = passportCollector.collect()
                 bannerFlow.value = if (granted) {
                     "Суперправа Shizuku (UID 2000) успешно подключены!"
@@ -122,7 +123,7 @@ class DashboardViewModel @Inject constructor(
     }
 
     fun requestRootAccess() {
-        viewModelScope.launch {
+        launchSafely {
             val granted = privilegeManager.requestRootAccess()
             passportFlow.value = passportCollector.collect()
             bannerFlow.value = if (granted) {
@@ -134,9 +135,11 @@ class DashboardViewModel @Inject constructor(
     }
 
     fun createBaselineCheckpoint() {
-        viewModelScope.launch {
-            val id = vaultManager.createBaselineCheckpoint()
-            bannerFlow.value = "Базовая точка восстановления #$id сохранена в StateVault."
+        launchSafely {
+            bannerFlow.value = when (val result = vaultManager.createBaselineCheckpoint()) {
+                is VaultTransactionResult.Success -> "Справочный снимок 9 параметров #${result.snapshotId} сохранён. Это не полный бэкап или автоматический откат."
+                is VaultTransactionResult.Failure -> result.errorMessage
+            }
         }
     }
 
@@ -145,11 +148,11 @@ class DashboardViewModel @Inject constructor(
      * speeds up Android window/transition/animator scales to snappy 0.5x.
      */
     fun applySnappyAnimationsTweak() {
-        viewModelScope.launch {
+        launchSafely {
             if (privilegeManager.state.value.activeTier == PrivilegeTier.BASIC) {
                 activeSheetFlow.value = DashboardSheet.WirelessAdbWizard
                 bannerFlow.value = "Для изменения системных шкал анимации подключите ADB / Shizuku или Root."
-                return@launch
+                return@launchSafely
             }
             val result = vaultManager.applyTransaction(
                 title = "Отзывчивые анимации интерфейса (0.5x)",
@@ -171,7 +174,7 @@ class DashboardViewModel @Inject constructor(
     }
 
     fun rollbackSnapshot(snapshotId: Long) {
-        viewModelScope.launch {
+        launchSafely {
             val res = vaultManager.rollbackSnapshot(snapshotId)
             bannerFlow.value = when (res) {
                 is VaultTransactionResult.Success ->
@@ -183,18 +186,19 @@ class DashboardViewModel @Inject constructor(
     }
 
     fun rollbackAllActive() {
-        viewModelScope.launch {
-            val count = vaultManager.rollbackAllActive()
-            bannerFlow.value = if (count > 0) {
-                "Аварийный откат выполнен: восстановлено точек — $count."
-            } else {
-                "Нет активных изменений для отката."
+        launchSafely {
+            val report = vaultManager.rollbackAllActive()
+            bannerFlow.value = buildString {
+                append("Проверено восстановлений: ${report.restoredCount} из ${report.eligibleCount}.")
+                if (report.failures.isNotEmpty()) append(" Ошибки: ${report.failures.values.joinToString("; ")}")
+                if (report.notAttemptedCount > 0) append(" Не запускались после сбоя: ${report.notAttemptedCount}.")
+                if (report.unverifiedCount > 0) append(" Старых/повреждённых записей без автоматического отката: ${report.unverifiedCount}.")
             }
         }
     }
 
     fun exportVaultJson(onJsonReady: (String) -> Unit) {
-        viewModelScope.launch {
+        launchSafely {
             val model = passportFlow.value?.advisor?.deviceModel ?: android.os.Build.MODEL
             val exported = vaultManager.exportSnapshotsJson(model)
             onJsonReady(exported)
@@ -204,4 +208,10 @@ class DashboardViewModel @Inject constructor(
     fun developerOptionsIntent(): Intent = privilegeManager.buildDeveloperOptionsIntent()
     fun aboutPhoneIntent(): Intent = privilegeManager.buildAboutPhoneIntent()
     fun shizukuIntent(): Intent = privilegeManager.buildOpenOrGetShizukuIntent()
+    private fun launchSafely(action: suspend () -> Unit) = viewModelScope.launch {
+        try { action() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) { bannerFlow.value = "Операция не подтверждена: ${error.message}. Проверьте журнал StateVault." }
+    }
+
 }
