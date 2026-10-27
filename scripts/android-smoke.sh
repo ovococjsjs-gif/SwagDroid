@@ -27,17 +27,30 @@ collect_and_stop() {
   local status=$?
   trap - EXIT INT TERM
   if [[ -n "$emulator_pid" ]]; then
-    timeout 10 "$ADB" -s "$SERIAL" logcat -b crash -d > "$OUTPUT/crash-logcat.txt" 2>&1 || true
-    timeout 10 "$ADB" -s "$SERIAL" shell dumpsys activity activities > "$OUTPUT/activities.txt" 2>&1 || true
-    timeout 10 "$ADB" -s "$SERIAL" exec-out screencap -p > "$OUTPUT/final-screen.png" 2>/dev/null || true
-    timeout 10 "$ADB" -s "$SERIAL" emu kill >/dev/null 2>&1 || true
+    if [[ "$(timeout 5 "$ADB" -s "$SERIAL" get-state 2>/dev/null || true)" == "device" ]]; then
+      timeout 10 "$ADB" -s "$SERIAL" logcat -b crash -d > "$OUTPUT/crash-logcat.txt" 2>&1 || true
+      timeout 10 "$ADB" -s "$SERIAL" shell dumpsys activity activities > "$OUTPUT/activities.txt" 2>&1 || true
+      timeout 10 "$ADB" -s "$SERIAL" exec-out screencap -p > "$OUTPUT/final-screen.png" 2>/dev/null || true
+      timeout 10 "$ADB" -s "$SERIAL" emu kill >/dev/null 2>&1 || true
+    fi
     if kill -0 "$emulator_pid" 2>/dev/null; then kill "$emulator_pid" 2>/dev/null || true; fi
     wait "$emulator_pid" 2>/dev/null || true
   fi
   if [[ "$status" -ne 0 ]]; then
-    for logfile in "$OUTPUT/emulator.log" "$OUTPUT/crash-logcat.txt"; do
-      [[ ! -f "$logfile" ]] || { echo "=== $logfile ==="; tail -n 60 "$logfile"; }
-    done
+    python3 - "$OUTPUT" <<'PYDIAG'
+import sys
+from pathlib import Path
+root=Path(sys.argv[1])
+# Log download hosts may be unavailable to reviewers; publish bounded diagnostic text
+# through the ordinary check annotations instead of reporting only a generic timeout.
+for name in ("emulator.log", "crash-logcat.txt", "avd.log", "sdk-install.log", "tests.log"):
+    path=root/name
+    if not path.exists(): continue
+    text="\n".join(path.read_text(errors="replace").splitlines()[-60:])[-7000:]
+    if text:
+        escaped=text.replace("%","%25").replace("\r","%0D").replace("\n","%0A")
+        print(f"::warning title=Android diagnostics {name}::{escaped}")
+PYDIAG
   fi
   exit "$status"
 }
@@ -70,19 +83,36 @@ if ! timeout 900 "$SDKMANAGER" "platform-tools" "emulator" "$IMAGE" > "$OUTPUT/s
   fail "SDK/image installation failed"
 fi
 "$EMULATOR" -accel-check > "$OUTPUT/acceleration.txt" 2>&1 || { cat "$OUTPUT/acceleration.txt"; fail "Emulator acceleration check failed"; }
+"$EMULATOR" -version > "$OUTPUT/emulator-version.txt" 2>&1
+python3 - "$OUTPUT" <<'PYENV'
+import json,sys
+from pathlib import Path
+root=Path(sys.argv[1])
+data={name: (root/name).read_text(errors="replace")[:1500] for name in ("acceleration.txt","emulator-version.txt")}
+print("::notice title=Android smoke tooling::"+json.dumps(data).replace("%","%25"))
+PYENV
 
 "$ADB" start-server >/dev/null
 # connectedAndroidTest discovers devices. Refuse to run if anything is already connected.
 [[ -z "$("$ADB" devices | awk 'NR>1 && NF {print $1}')" ]] || fail "Runner already has an ADB device; refusing to touch it"
 printf 'no\n' | "$AVDMANAGER" create avd --force --name "$AVD" --package "$IMAGE" --device pixel_5 > "$OUTPUT/avd.log" 2>&1
 
-"$EMULATOR" -avd "$AVD" -port 5554 -no-window -no-audio -no-snapshot -no-boot-anim \
+"$EMULATOR" -avd "$AVD" -port 5554 -no-window -noaudio -no-snapshot -no-boot-anim \
   -gpu swiftshader_indirect -memory 2048 -cores 2 -camera-back none -camera-front none \
   > "$OUTPUT/emulator.log" 2>&1 &
 emulator_pid=$!
 export ANDROID_SERIAL="$SERIAL"
 
-timeout 180 "$ADB" -s "$SERIAL" wait-for-device || fail "Emulator did not connect to ADB"
+connected=false
+for attempt in $(seq 1 90); do
+  kill -0 "$emulator_pid" 2>/dev/null || fail "Emulator process exited before connecting to ADB"
+  if [[ "$(timeout 5 "$ADB" -s "$SERIAL" get-state 2>/dev/null || true)" == "device" ]]; then
+    connected=true
+    break
+  fi
+  sleep 2
+done
+[[ "$connected" == "true" ]] || fail "Emulator did not connect to ADB"
 booted=false
 for attempt in $(seq 1 120); do
   if [[ "$("$ADB" -s "$SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]]; then
