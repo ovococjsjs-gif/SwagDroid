@@ -42,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -164,9 +165,9 @@ fun CleanerRoute(
                                 Button(onClick = requestAccess, modifier = Modifier.fillMaxWidth().testTag("cleaner_access")) { Text("Разрешить доступ к файлам") }
                             } else {
                                 Button(
-                                    onClick = if (state.scan != null) viewModel::resumeSelection else viewModel::runScan,
+                                    onClick = if (state.scan?.candidates?.isNotEmpty() == true) viewModel::resumeSelection else viewModel::runScan,
                                     modifier = Modifier.fillMaxWidth().testTag("cleaner_scan"),
-                                ) { Text(if (state.scan != null) "Продолжить выбор" else "Найти файлы") }
+                                ) { Text(if (state.scan?.candidates?.isNotEmpty() == true) "Продолжить выбор" else "Найти файлы") }
                                 if (state.scan != null) TextButton(onClick = viewModel::runScan, modifier = Modifier.fillMaxWidth()) { Text("Начать новый поиск") }
                             }
                         }
@@ -203,184 +204,186 @@ fun CleanerRoute(
             }
         },
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding).testTag(if (state.step == CleanupStep.REVIEW) "cleanup_plan_list" else "cleaner_list"),
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            state.bannerMessage?.let { message ->
-                item {
-                    InfoPanel(message, warning = true)
-                    TextButton(onClick = viewModel::dismissBanner) { Text("Понятно") }
-                }
-            }
-            when {
-                state.isRestoringReceipt -> item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-                state.isScanning -> item {
-                    FlowCard {
-                        Icon(SwagIcons.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(36.dp))
-                        Text("Ищем в доступных папках", style = MaterialTheme.typography.titleLarge)
-                        Text(state.progress.location)
-                        LinearProgressIndicator(Modifier.fillMaxWidth())
-                        Text("Просмотрено файлов: ${state.progress.inspectedFiles}. Ничего не удаляется.", style = MaterialTheme.typography.bodyMedium)
-                        Text("Ограничения поиска будут показаны вместе с результатами.", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-                state.isPreparingCleanup -> item {
-                    FlowCard {
-                        Text("Проверяем выбранные файлы", style = MaterialTheme.typography.titleLarge)
-                        LinearProgressIndicator(Modifier.fillMaxWidth())
-                        Text("Читаем содержимое и сохраняемые оригиналы. Большие файлы проверяются дольше. Удаление ещё не началось.")
-                    }
-                }
-                state.isCleaning -> item {
-                    FlowCard {
-                        Text("Удаляем только подтверждённый список", style = MaterialTheme.typography.titleLarge)
-                        LinearProgressIndicator(Modifier.fillMaxWidth())
-                        Text("Новые и изменившиеся файлы не добавляются к удалению. Если приложение прервётся, точный результат может быть неизвестен.")
-                    }
-                }
-                state.step == CleanupStep.ACCESS -> {
+        key(state.step, state.scan?.id, plan?.id) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(padding).testTag(if (state.step == CleanupStep.REVIEW) "cleanup_plan_list" else "cleaner_list"),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                state.bannerMessage?.let { message ->
                     item {
-                        FlowCard(emphasized = true) {
-                            Icon(SwagIcons.Storage, contentDescription = null, modifier = Modifier.size(40.dp))
-                            Text("Место — под вашим контролем", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
-                            state.space?.let {
-                                Text("Свободно ${formatBytesRu(it.availableBytes)}", style = MaterialTheme.typography.headlineSmall)
-                                Text("из ${formatBytesRu(it.totalBytes)} · данные Android сейчас", style = MaterialTheme.typography.bodySmall)
-                                LinearProgressIndicator(progress = { (1f - it.availableBytes.toFloat() / it.totalBytes).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
-                            }
-                            Text("Найдём доступные файлы. Вы сами выберете, что больше не нужно — ничего не отмечается автоматически.")
-                        }
+                        InfoPanel(message, warning = true)
+                        TextButton(onClick = viewModel::dismissBanner) { Text("Понятно") }
                     }
-                    item {
+                }
+                when {
+                    state.isRestoringReceipt -> item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+                    state.isScanning -> item {
                         FlowCard {
-                            Text(if (state.access.canScan) "Доступ к общим файлам выдан" else "Сначала — доступ к файлам", style = MaterialTheme.typography.titleMedium)
-                            Text(if (state.access.canScan) "Можно начать поиск. Разрешение не открывает все чужие каталоги." else "Android откроет настройки доступа. Разрешение нужно, чтобы показать общие файлы и удалить только ваш подтверждённый выбор.")
-                            if (state.access == StorageAccess.LEGACY_GRANTED) Text("На Android 9–10 действуют ограничения вашей версии системы; выдача разрешения не означает доступ ко всем папкам.", style = MaterialTheme.typography.bodySmall)
-                            TextButton(onClick = { coverageOpen = true }) { Text("Какие папки проверяем") }
+                            Icon(SwagIcons.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(36.dp))
+                            Text("Ищем в доступных папках", style = MaterialTheme.typography.titleLarge)
+                            Text(state.progress.location)
+                            LinearProgressIndicator(Modifier.fillMaxWidth())
+                            Text("Просмотрено файлов: ${state.progress.inspectedFiles}. Ничего не удаляется.", style = MaterialTheme.typography.bodyMedium)
+                            Text("Ограничения поиска будут показаны вместе с результатами.", style = MaterialTheme.typography.bodySmall)
                         }
                     }
-                    item { InfoPanel("Корзины пока нет. Удаление необратимо через SwagDroid — сначала сохраните нужное в другом месте.", warning = true) }
-                    state.lastReceipt?.let { receipt ->
-                        item {
-                            FlowCard {
-                                Text("Последняя очистка", style = MaterialTheme.typography.titleSmall)
-                                Text(cleanupDate(receipt.startedAtMs), style = MaterialTheme.typography.bodySmall)
-                                Text(if (receipt.status == CleanupReceipt.Status.COMPLETE) "Удалено файлов: ${receipt.deletedFiles}; пропущено: ${receipt.skipped}; ошибок: ${receipt.failed}." else "Завершение не подтверждено. Часть файлов могла быть удалена.")
-                                TextButton(onClick = viewModel::showLastResult) { Text("Посмотреть итог") }
-                            }
+                    state.isPreparingCleanup -> item {
+                        FlowCard {
+                            Text("Проверяем выбранные файлы", style = MaterialTheme.typography.titleLarge)
+                            LinearProgressIndicator(Modifier.fillMaxWidth())
+                            Text("Читаем содержимое и сохраняемые оригиналы. Большие файлы проверяются дольше. Удаление ещё не началось.")
                         }
                     }
-                }
-                state.step == CleanupStep.CHOOSE -> {
-                    val scan = state.scan
-                    if (scan != null) {
+                    state.isCleaning -> item {
+                        FlowCard {
+                            Text("Удаляем только подтверждённый список", style = MaterialTheme.typography.titleLarge)
+                            LinearProgressIndicator(Modifier.fillMaxWidth())
+                            Text("Новые и изменившиеся файлы не добавляются к удалению. Если приложение прервётся, точный результат может быть неизвестен.")
+                        }
+                    }
+                    state.step == CleanupStep.ACCESS -> {
                         item {
                             FlowCard(emphasized = true) {
-                                Text(if (scan.candidates.isEmpty()) "Кандидатов не найдено" else "Выберите, что больше не нужно", style = MaterialTheme.typography.titleLarge, modifier = Modifier.testTag("cleanup_results"))
-                                Text("${scan.candidates.size} объектов · ${formatBytesRu(scan.fileBytes)}", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
-                                Text("Размер найденных файлов, не обещание освободить столько места. Список не означает, что файлы лишние.", style = MaterialTheme.typography.bodySmall)
-                                Text("Поиск: ${cleanupDate(scan.scannedAtMs)}", style = MaterialTheme.typography.labelSmall)
+                                Icon(SwagIcons.Storage, contentDescription = null, modifier = Modifier.size(40.dp))
+                                Text("Место — под вашим контролем", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
+                                state.space?.let {
+                                    Text("Свободно ${formatBytesRu(it.availableBytes)}", style = MaterialTheme.typography.headlineSmall)
+                                    Text("из ${formatBytesRu(it.totalBytes)} · данные Android сейчас", style = MaterialTheme.typography.bodySmall)
+                                    LinearProgressIndicator(progress = { (1f - it.availableBytes.toFloat() / it.totalBytes).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+                                }
+                                Text("Найдём доступные файлы. Вы сами выберете, что больше не нужно — ничего не отмечается автоматически.")
                             }
                         }
                         item {
-                            val unavailable = scan.coverage.locations.count { it.status in setOf(ScanLocationStatus.UNAVAILABLE, ScanLocationStatus.NOT_REACHED, ScanLocationStatus.PARTIAL) }
-                            InfoPanel(if (scan.coverage.isPartial) {
-                                if (unavailable > 0) "Не полностью проверено папок: $unavailable. Сравнение точных копий также ограничено."
-                                else "Папки просмотрены в доступных пределах, но сравнение содержимого файлов ограничено."
-                            } else "Проверены доступные выбранные папки, не весь телефон. Внутренние данные приложений, Android/data, SD-карты и облако не включены.", warning = scan.coverage.isPartial)
-                            TextButton(onClick = { coverageOpen = true }, modifier = Modifier.testTag("cleaner_coverage")) { Text("Что проверено и пропущено") }
-                        }
-                        item {
-                            OutlinedTextField(
-                                value = state.query, onValueChange = viewModel::setQuery,
-                                modifier = Modifier.fillMaxWidth().testTag("cleanup_search"), singleLine = true,
-                                label = { Text("Имя или путь файла") }, leadingIcon = { Icon(SwagIcons.Search, contentDescription = null) },
-                            )
-                            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                FilterChip(selected = state.bucket == null, onClick = { viewModel.setBucket(null) }, label = { Text("Все") })
-                                CleanupBucket.entries.forEach { bucket ->
-                                    val count = scan.candidates.count { it.bucket == bucket }
-                                    if (count > 0) FilterChip(selected = state.bucket == bucket, onClick = { viewModel.setBucket(bucket) }, label = { Text("${bucket.title} · $count") })
-                                }
-                            }
-                            state.bucket?.let { Text(it.explanation, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp)) }
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                if (state.bucket in setOf(CleanupBucket.TEMPORARY, CleanupBucket.EMPTY_DIRECTORIES) && state.visibleCandidates.isNotEmpty()) {
-                                    TextButton(onClick = viewModel::selectFilteredFiles) { Text("Выбрать эти ${state.visibleCandidates.size}") }
-                                }
-                                if (state.selectedPaths.isNotEmpty()) TextButton(onClick = viewModel::clearSelection) { Text("Снять весь выбор") }
-                            }
-                        }
-                        if (state.visibleCandidates.isEmpty()) item {
-                            Text(if (scan.candidates.isEmpty()) "В доступной проверенной части кандидатов нет. Это не доказательство, что всё хранилище пусто или очищено." else "В этом фильтре файлов нет. Выбор в других разделах сохранён.")
-                        }
-                        items(state.visibleCandidates, key = { it.file.path }) { file ->
-                            CandidateRow(file, file.file.path in state.selectedPaths, onToggle = { viewModel.toggleFile(file.file.path) }, onDetails = { detailPath = file.file.path })
-                        }
-                        item { TextButton(onClick = viewModel::runScan) { Text("Повторить поиск и сбросить выбор") } }
-                    }
-                }
-                state.step == CleanupStep.REVIEW && plan != null -> {
-                    item {
-                        FlowCard(emphasized = true) {
-                            Text("Проверьте окончательный список", style = MaterialTheme.typography.titleLarge)
-                            Text("${plan.fileCount} файлов · ${plan.directoryCount} пустых папок", style = MaterialTheme.typography.titleMedium)
-                            Text(formatBytesRu(plan.fileBytes), style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold))
-                            Text("Выбор из всех фильтров. Каждый путь учитывается один раз.", style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                    item { InfoPanel("Удаление без корзины. Восстановить файлы через SwagDroid невозможно. Если сомневаетесь — вернитесь к выбору.", warning = true) }
-                    items(plan.targets, key = { it.snapshot.path }) { target ->
-                        FlowCard {
-                            Text(java.io.File(target.snapshot.path).name, style = MaterialTheme.typography.titleSmall)
-                            Text(target.snapshot.path, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
-                            Text(if (target.snapshot.isEmptyDirectory) "Только пустая папка" else formatBytesRu(target.snapshot.bytes), style = MaterialTheme.typography.labelMedium)
-                            target.requiredOriginals.forEach { Text("Оригинал остаётся: ${it.path}", style = MaterialTheme.typography.bodySmall) }
-                        }
-                    }
-                    if (plan.exclusions.isNotEmpty()) {
-                        item { Text("Не включено в удаление: ${plan.exclusions.size}", style = MaterialTheme.typography.titleMedium) }
-                        items(plan.exclusions) { InfoPanel("${it.path}\n${it.reason}", warning = true) }
-                    }
-                    if (plan.targets.isEmpty()) item { Text("Подтверждённых объектов нет. Вернитесь к выбору или выполните новый поиск.") }
-                }
-                state.step == CleanupStep.RESULT -> {
-                    val completed = state.outcome as? CleanupRunOutcome.Completed
-                    val receipt = completed?.receipt ?: state.lastReceipt
-                    val interrupted = state.outcome as? CleanupRunOutcome.Interrupted
-                    val notStarted = state.outcome as? CleanupRunOutcome.NotStarted
-                    when {
-                        notStarted != null -> item { InfoPanel(notStarted.reason, warning = true) }
-                        interrupted != null || receipt?.status != CleanupReceipt.Status.COMPLETE -> item {
                             FlowCard {
-                                Icon(SwagIcons.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(36.dp))
-                                Text("Завершение не подтверждено", style = MaterialTheme.typography.headlineSmall)
-                                Text(interrupted?.reason ?: "Последняя операция прервалась или её итог не удалось сохранить. Часть файлов могла быть удалена; точные числа неизвестны.")
-                                Text("Удаление не продолжается автоматически. Проверьте доступные файлы заново.")
+                                Text(if (state.access.canScan) "Доступ к общим файлам выдан" else "Сначала — доступ к файлам", style = MaterialTheme.typography.titleMedium)
+                                Text(if (state.access.canScan) "Можно начать поиск. Разрешение не открывает все чужие каталоги." else "Android откроет настройки доступа. Разрешение нужно, чтобы показать общие файлы и удалить только ваш подтверждённый выбор.")
+                                if (state.access == StorageAccess.LEGACY_GRANTED) Text("На Android 9–10 действуют ограничения вашей версии системы; выдача разрешения не означает доступ ко всем папкам.", style = MaterialTheme.typography.bodySmall)
+                                TextButton(onClick = { coverageOpen = true }) { Text("Какие папки проверяем") }
                             }
                         }
-                        else -> item {
-                            val problems = (receipt.skipped ?: 0) + (receipt.failed ?: 0)
-                            FlowCard(emphasized = problems == 0) {
-                                Text(if (problems == 0) "Выбранный список обработан" else "Есть пропуски или ошибки", style = MaterialTheme.typography.headlineSmall)
-                                Text("Удалено файлов: ${receipt.deletedFiles}", style = MaterialTheme.typography.titleLarge, modifier = Modifier.testTag("cleanup_result_files"))
-                                Text("Пустых папок: ${receipt.deletedDirectories}")
-                                Text("Размер удалённых файлов: ${formatBytesRu(receipt.deletedBytes ?: 0)}")
-                                Text("Это сумма размеров файлов, не замер освободившегося места.", style = MaterialTheme.typography.bodySmall)
-                                Text("Пропущено: ${receipt.skipped} · Ошибок: ${receipt.failed}", modifier = Modifier.testTag("cleanup_result_problems"))
-                                state.space?.let { Text("Сейчас свободно: ${formatBytesRu(it.availableBytes)}", style = MaterialTheme.typography.labelLarge) }
-                                if (completed == null) Text("${if (state.lastReceiptPersisted) "Сохранённый итог" else "Итог только в памяти этого сеанса"} ${cleanupDate(receipt.startedAtMs)}. Подробные пути доступны только для текущего запуска.", style = MaterialTheme.typography.bodySmall)
+                        item { InfoPanel("Корзины пока нет. Удаление необратимо через SwagDroid — сначала сохраните нужное в другом месте.", warning = true) }
+                        state.lastReceipt?.let { receipt ->
+                            item {
+                                FlowCard {
+                                    Text("Последняя очистка", style = MaterialTheme.typography.titleSmall)
+                                    Text(cleanupDate(receipt.startedAtMs), style = MaterialTheme.typography.bodySmall)
+                                    Text(if (receipt.status == CleanupReceipt.Status.COMPLETE) "Удалено файлов: ${receipt.deletedFiles}; пропущено: ${receipt.skipped}; ошибок: ${receipt.failed}." else "Завершение не подтверждено. Часть файлов могла быть удалена.")
+                                    TextButton(onClick = viewModel::showLastResult) { Text("Посмотреть итог") }
+                                }
                             }
                         }
                     }
-                    if (completed != null) {
-                        if (!completed.receiptSaved) item { InfoPanel("Файловый итог получен, но не удалось сохранить его для следующего запуска. Не считайте это подтверждением записанной истории.", warning = true) }
-                        items(completed.result.skipped) { InfoPanel("Не удалён: ${it.path}\n${it.reason}", warning = true) }
-                        items(completed.result.failed) { InfoPanel("Ошибка удаления: ${it.path}\n${it.reason}", warning = true) }
+                    state.step == CleanupStep.CHOOSE -> {
+                        val scan = state.scan
+                        if (scan != null) {
+                            item {
+                                FlowCard(emphasized = true) {
+                                    Text(if (scan.candidates.isEmpty()) "Кандидатов не найдено" else "Выберите, что больше не нужно", style = MaterialTheme.typography.titleLarge, modifier = Modifier.testTag("cleanup_results"))
+                                    Text("${scan.candidates.size} объектов · ${formatBytesRu(scan.fileBytes)}", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
+                                    Text("Размер найденных файлов, не обещание освободить столько места. Список не означает, что файлы лишние.", style = MaterialTheme.typography.bodySmall)
+                                    Text("Поиск: ${cleanupDate(scan.scannedAtMs)}", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                            item {
+                                val unavailable = scan.coverage.locations.count { it.status in setOf(ScanLocationStatus.UNAVAILABLE, ScanLocationStatus.NOT_REACHED, ScanLocationStatus.PARTIAL) }
+                                InfoPanel(if (scan.coverage.isPartial) {
+                                    if (unavailable > 0) "Не полностью проверено папок: $unavailable. Сравнение точных копий также ограничено."
+                                    else "Папки просмотрены в доступных пределах, но сравнение содержимого файлов ограничено."
+                                } else "Проверены доступные выбранные папки, не весь телефон. Внутренние данные приложений, Android/data, SD-карты и облако не включены.", warning = scan.coverage.isPartial)
+                                TextButton(onClick = { coverageOpen = true }, modifier = Modifier.testTag("cleaner_coverage")) { Text("Что проверено и пропущено") }
+                            }
+                            item {
+                                OutlinedTextField(
+                                    value = state.query, onValueChange = viewModel::setQuery,
+                                    modifier = Modifier.fillMaxWidth().testTag("cleanup_search"), singleLine = true,
+                                    label = { Text("Имя или путь файла") }, leadingIcon = { Icon(SwagIcons.Search, contentDescription = null) },
+                                )
+                                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    FilterChip(selected = state.bucket == null, onClick = { viewModel.setBucket(null) }, label = { Text("Все") })
+                                    CleanupBucket.entries.forEach { bucket ->
+                                        val count = scan.candidates.count { it.bucket == bucket }
+                                        if (count > 0) FilterChip(selected = state.bucket == bucket, onClick = { viewModel.setBucket(bucket) }, label = { Text("${bucket.title} · $count") })
+                                    }
+                                }
+                                state.bucket?.let { Text(it.explanation, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp)) }
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    if (state.bucket in setOf(CleanupBucket.TEMPORARY, CleanupBucket.EMPTY_DIRECTORIES) && state.visibleCandidates.isNotEmpty()) {
+                                        TextButton(onClick = viewModel::selectFilteredFiles) { Text("Выбрать эти ${state.visibleCandidates.size}") }
+                                    }
+                                    if (state.selectedPaths.isNotEmpty()) TextButton(onClick = viewModel::clearSelection) { Text("Снять весь выбор") }
+                                }
+                            }
+                            if (state.visibleCandidates.isEmpty()) item {
+                                Text(if (scan.candidates.isEmpty()) "В доступной проверенной части кандидатов нет. Это не доказательство, что всё хранилище пусто или очищено." else "В этом фильтре файлов нет. Выбор в других разделах сохранён.")
+                            }
+                            items(state.visibleCandidates, key = { it.file.path }) { file ->
+                                CandidateRow(file, file.file.path in state.selectedPaths, onToggle = { viewModel.toggleFile(file.file.path) }, onDetails = { detailPath = file.file.path })
+                            }
+                            item { TextButton(onClick = viewModel::runScan) { Text("Повторить поиск и сбросить выбор") } }
+                        }
                     }
-                    item { Text("Корзины и отката файлов нет. Для актуального списка нужен новый поиск.", style = MaterialTheme.typography.bodySmall) }
+                    state.step == CleanupStep.REVIEW && plan != null -> {
+                        item {
+                            FlowCard(emphasized = true) {
+                                Text("Проверьте окончательный список", style = MaterialTheme.typography.titleLarge)
+                                Text("${plan.fileCount} файлов · ${plan.directoryCount} пустых папок", style = MaterialTheme.typography.titleMedium)
+                                Text(formatBytesRu(plan.fileBytes), style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold))
+                                Text("Выбор из всех фильтров. Каждый путь учитывается один раз.", style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                        item { InfoPanel("Удаление без корзины. Восстановить файлы через SwagDroid невозможно. Если сомневаетесь — вернитесь к выбору.", warning = true) }
+                        items(plan.targets, key = { it.snapshot.path }) { target ->
+                            FlowCard {
+                                Text(java.io.File(target.snapshot.path).name, style = MaterialTheme.typography.titleSmall)
+                                Text(target.snapshot.path, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
+                                Text(if (target.snapshot.isEmptyDirectory) "Только пустая папка" else formatBytesRu(target.snapshot.bytes), style = MaterialTheme.typography.labelMedium)
+                                target.requiredOriginals.forEach { Text("Оригинал остаётся: ${it.path}", style = MaterialTheme.typography.bodySmall) }
+                            }
+                        }
+                        if (plan.exclusions.isNotEmpty()) {
+                            item { Text("Не включено в удаление: ${plan.exclusions.size}", style = MaterialTheme.typography.titleMedium) }
+                            items(plan.exclusions) { InfoPanel("${it.path}\n${it.reason}", warning = true) }
+                        }
+                        if (plan.targets.isEmpty()) item { Text("Подтверждённых объектов нет. Вернитесь к выбору или выполните новый поиск.") }
+                    }
+                    state.step == CleanupStep.RESULT -> {
+                        val completed = state.outcome as? CleanupRunOutcome.Completed
+                        val receipt = completed?.receipt ?: state.lastReceipt
+                        val interrupted = state.outcome as? CleanupRunOutcome.Interrupted
+                        val notStarted = state.outcome as? CleanupRunOutcome.NotStarted
+                        when {
+                            notStarted != null -> item { InfoPanel(notStarted.reason, warning = true) }
+                            interrupted != null || receipt?.status != CleanupReceipt.Status.COMPLETE -> item {
+                                FlowCard {
+                                    Icon(SwagIcons.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(36.dp))
+                                    Text("Завершение не подтверждено", style = MaterialTheme.typography.headlineSmall)
+                                    Text(interrupted?.reason ?: "Последняя операция прервалась или её итог не удалось сохранить. Часть файлов могла быть удалена; точные числа неизвестны.")
+                                    Text("Удаление не продолжается автоматически. Проверьте доступные файлы заново.")
+                                }
+                            }
+                            else -> item {
+                                val problems = (receipt.skipped ?: 0) + (receipt.failed ?: 0)
+                                FlowCard(emphasized = problems == 0) {
+                                    Text(if (problems == 0) "Выбранный список обработан" else "Есть пропуски или ошибки", style = MaterialTheme.typography.headlineSmall)
+                                    Text("Удалено файлов: ${receipt.deletedFiles}", style = MaterialTheme.typography.titleLarge, modifier = Modifier.testTag("cleanup_result_files"))
+                                    Text("Пустых папок: ${receipt.deletedDirectories}")
+                                    Text("Размер удалённых файлов: ${formatBytesRu(receipt.deletedBytes ?: 0)}")
+                                    Text("Это сумма размеров файлов, не замер освободившегося места.", style = MaterialTheme.typography.bodySmall)
+                                    Text("Пропущено: ${receipt.skipped} · Ошибок: ${receipt.failed}", modifier = Modifier.testTag("cleanup_result_problems"))
+                                    state.space?.let { Text("Сейчас свободно: ${formatBytesRu(it.availableBytes)}", style = MaterialTheme.typography.labelLarge) }
+                                    if (completed == null) Text("${if (state.lastReceiptPersisted) "Сохранённый итог" else "Итог только в памяти этого сеанса"} ${cleanupDate(receipt.startedAtMs)}. Подробные пути доступны только для текущего запуска.", style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                        if (completed != null) {
+                            if (!completed.receiptSaved) item { InfoPanel("Файловый итог получен, но не удалось сохранить его для следующего запуска. Не считайте это подтверждением записанной истории.", warning = true) }
+                            items(completed.result.skipped) { InfoPanel("Не удалён: ${it.path}\n${it.reason}", warning = true) }
+                            items(completed.result.failed) { InfoPanel("Ошибка удаления: ${it.path}\n${it.reason}", warning = true) }
+                        }
+                        item { Text("Корзины и отката файлов нет. Для актуального списка нужен новый поиск.", style = MaterialTheme.typography.bodySmall) }
+                    }
                 }
             }
         }

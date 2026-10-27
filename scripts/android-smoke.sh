@@ -37,6 +37,7 @@ collect_and_stop() {
   if [[ -n "$emulator_pid" ]]; then
     if [[ "$(timeout 5 "$ADB" -s "$SERIAL" get-state 2>/dev/null || true)" == "device" ]]; then
       timeout 10 "$ADB" -s "$SERIAL" logcat -b crash -d > "$OUTPUT/crash-logcat.txt" 2>&1 || true
+      timeout 10 "$ADB" -s "$SERIAL" logcat -b system -b main -d -v brief -s ActivityManager AndroidRuntime > "$OUTPUT/process-logcat.txt" 2>&1 || true
       timeout 10 "$ADB" -s "$SERIAL" shell dumpsys activity activities > "$OUTPUT/activities.txt" 2>&1 || true
       timeout 10 "$ADB" -s "$SERIAL" exec-out screencap -p > "$OUTPUT/final-screen.png" 2>/dev/null || true
       timeout 10 "$ADB" -s "$SERIAL" emu kill >/dev/null 2>&1 || true
@@ -51,7 +52,7 @@ from pathlib import Path
 root=Path(sys.argv[1])
 # Log download hosts may be unavailable to reviewers; publish bounded diagnostic text
 # through the ordinary check annotations instead of reporting only a generic timeout.
-for name in ("instrumentation-app.txt", "instrumentation-vault.txt", "installed-runners.txt", "test-install.log", "app-signature.txt", "app-test-signature.txt", "emulator.log", "emulator-version.txt", "acceleration.txt", "crash-logcat.txt", "avd.log", "avd-list.txt", "host-packages.log", "sdk-install.log", "tests.log"):
+for name in ("instrumentation-app.txt", "process-logcat.txt", "instrumentation-vault.txt", "installed-runners.txt", "test-install.log", "app-signature.txt", "app-test-signature.txt", "emulator.log", "emulator-version.txt", "acceleration.txt", "crash-logcat.txt", "avd.log", "avd-list.txt", "host-packages.log", "sdk-install.log", "tests.log"):
     path=root/name
     if not path.exists(): continue
     text="\n".join(path.read_text(errors="replace").splitlines()[-40:])[-3200:]
@@ -234,6 +235,9 @@ failed=0
 if ! timeout 600 "$ADB" -s "$SERIAL" shell am instrument -w -r -e debug false   -e class com.swagdroid.core.vault.VaultMigrationInstrumentedTest   "$(cat "$OUTPUT/vault-runner.txt")" > "$OUTPUT/instrumentation-vault.txt" 2>&1; then failed=1; fi
 if ! python3 scripts/instrumentation-to-junit.py --input "$OUTPUT/instrumentation-vault.txt"   --output core/vault/build/outputs/androidTest-results/adb-smoke/TEST-VaultMigrationInstrumentedTest.xml   --class-name com.swagdroid.core.vault.VaultMigrationInstrumentedTest --min-tests 4; then failed=1; fi
 
+# Permission revocation can terminate the target UID. Establish it outside the
+# instrumentation process; the first UI case tests the real settings/grant/return path.
+"$ADB" -s "$SERIAL" shell appops set --uid com.swagdroid.debug MANAGE_EXTERNAL_STORAGE ignore
 if ! timeout 600 "$ADB" -s "$SERIAL" shell am instrument -w -r -e debug false   -e class com.swagdroid.BasicSmokeTest   "$(cat "$OUTPUT/app-runner.txt")" > "$OUTPUT/instrumentation-app.txt" 2>&1; then failed=1; fi
 if ! python3 scripts/instrumentation-to-junit.py --input "$OUTPUT/instrumentation-app.txt"   --output app/build/outputs/androidTest-results/adb-smoke/TEST-BasicSmokeTest.xml   --class-name com.swagdroid.BasicSmokeTest --min-tests 8; then failed=1; fi
 

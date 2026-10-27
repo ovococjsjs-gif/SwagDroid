@@ -26,6 +26,11 @@ class AndroidCleanupReceiptStore @Inject constructor(@ApplicationContext private
         val values = CleanupReceiptCodec.encode(receipt)
         require(CleanupReceiptCodec.decode(values) == receipt)
         context.cleanupReceiptDataStore.edit { stored ->
+            val previous = stored.asMap().map { (key, value) ->
+                require(value is String) { "Повреждён формат предыдущего итога" }
+                key.name to value
+            }.toMap()
+            CleanupReceiptCodec.decode(previous) // Never overwrite an unreadable record as if it were empty.
             stored.clear()
             values.forEach { (key, value) -> stored[stringPreferencesKey(key)] = value }
         }

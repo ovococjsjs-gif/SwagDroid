@@ -27,6 +27,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.FixMethodOrder
+import org.junit.runners.MethodSorters
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -35,6 +37,7 @@ import java.util.UUID
 
 /** Disposable emulator only. Deletion cases select exclusively UUID-scoped synthetic fixtures. */
 @RunWith(AndroidJUnit4::class)
+@FixMethodOrder(MethodSorters.NAME_ASCENDING)
 class BasicSmokeTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
     private val fixtures = mutableListOf<File>()
@@ -86,8 +89,10 @@ class BasicSmokeTest {
         assertEquals(before, Settings.Secure.getString(resolver, "enabled_accessibility_services"))
     }
 
-    @Test fun returningFromPermissionSettingsRefreshesAccessWithoutAutoScan() {
-        storageAccess(false)
+    @Test fun a00ReturningFromPermissionSettingsRefreshesAccessWithoutAutoScan() {
+        // Revoking all-files access may kill this instrumentation process. The CI host
+        // establishes the denied state BEFORE am instrument, not from inside the runner.
+        assertFalse("The host must start this suite without all-files access", Environment.isExternalStorageManager())
         openTab("CLEANER")
         compose.activityRule.scenario.recreate()
         compose.waitUntil(10_000) { exists("cleaner_access") }
