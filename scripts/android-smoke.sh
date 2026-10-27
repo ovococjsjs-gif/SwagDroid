@@ -18,9 +18,10 @@ IMAGE="system-images;android-35;google_apis;x86_64"
 AVD="swagdroid-ci-api35"
 # New command-line tools and emulator builds may use different default AVD homes.
 # Give both an explicit disposable directory; never rely on ~/.android discovery.
-export ANDROID_USER_HOME="${RUNNER_TEMP:-/tmp}/swagdroid-android-home"
-export ANDROID_EMULATOR_HOME="$ANDROID_USER_HOME"
-export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+# Do not change ANDROID_USER_HOME: AGP also uses it for the debug keystore.
+# Main APK and test APK must keep the same signing identity across Gradle calls.
+export ANDROID_EMULATOR_HOME="${RUNNER_TEMP:-/tmp}/swagdroid-emulator-home"
+export ANDROID_AVD_HOME="$ANDROID_EMULATOR_HOME/avd"
 mkdir -p "$ANDROID_AVD_HOME"
 AVD_PATH="$ANDROID_AVD_HOME/$AVD.avd"
 SERIAL="emulator-5554"
@@ -50,7 +51,7 @@ from pathlib import Path
 root=Path(sys.argv[1])
 # Log download hosts may be unavailable to reviewers; publish bounded diagnostic text
 # through the ordinary check annotations instead of reporting only a generic timeout.
-for name in ("instrumentation-app.txt", "instrumentation-vault.txt", "installed-runners.txt", "test-install.log", "emulator.log", "emulator-version.txt", "acceleration.txt", "crash-logcat.txt", "avd.log", "avd-list.txt", "host-packages.log", "sdk-install.log", "tests.log"):
+for name in ("instrumentation-app.txt", "instrumentation-vault.txt", "installed-runners.txt", "test-install.log", "app-signature.txt", "app-test-signature.txt", "emulator.log", "emulator-version.txt", "acceleration.txt", "crash-logcat.txt", "avd.log", "avd-list.txt", "host-packages.log", "sdk-install.log", "tests.log"):
     path=root/name
     if not path.exists(): continue
     text="\n".join(path.read_text(errors="replace").splitlines()[-40:])[-3200:]
@@ -70,7 +71,7 @@ trap 'echo "::error title=Android smoke shell::Unexpected exit at script line $L
 export QT_QPA_PLATFORM=offscreen
 
 echo "=== Compile instrumentation APKs before downloading/booting the emulator ==="
-if ! ./gradlew :app:assembleDebugAndroidTest :core:vault:assembleDebugAndroidTest --stacktrace --no-daemon > "$OUTPUT/compile.log" 2>&1; then
+if ! ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest :core:vault:assembleDebugAndroidTest --stacktrace --no-daemon > "$OUTPUT/compile.log" 2>&1; then
   grep -E '^e: |FAILED|What went wrong:|Execution failed' "$OUTPUT/compile.log" | head -n 35 || true
   python3 - "$OUTPUT/compile.log" <<'PY'
 import sys
@@ -173,15 +174,33 @@ assert data["ro.product.cpu.abi"]=="x86_64",data
 print("::notice title=Android smoke device::"+json.dumps(data).replace("%","%25"))
 PY
 
+echo "=== Verify APK signing identity before installing tests ==="
+mapfile -t app_tests < <(find app/build/outputs/apk/androidTest -name '*.apk' -type f)
+mapfile -t vault_tests < <(find core/vault/build/outputs/apk/androidTest -name '*.apk' -type f)
+[[ "${#app_tests[@]}" == 1 && "${#vault_tests[@]}" == 1 ]] || fail "Expected one instrumentation APK for each smoke module"
+APKSIGNER="$(find "$SDK/build-tools" -maxdepth 2 -type f -name apksigner | sort -V | tail -n 1)"
+[[ -x "$APKSIGNER" ]] || fail "apksigner is unavailable"
+"$APKSIGNER" verify --print-certs app/build/outputs/apk/debug/app-debug.apk > "$OUTPUT/app-signature.txt" 2>&1
+"$APKSIGNER" verify --print-certs "${app_tests[0]}" > "$OUTPUT/app-test-signature.txt" 2>&1
+python3 - "$OUTPUT" <<'PYSIGN'
+import re,sys
+from pathlib import Path
+root=Path(sys.argv[1])
+def certificates(name):
+    return sorted(re.findall(r"Signer #\d+ certificate SHA-256 digest: ([0-9a-fA-F]+)", (root/name).read_text()))
+app=certificates("app-signature.txt")
+test=certificates("app-test-signature.txt")
+assert app and app==test, "Debug target and instrumentation APK signatures do not match"
+(root/"matching-certificate.txt").write_text(",".join(app))
+print("Verified matching Debug/instrumentation signing certificates")
+PYSIGN
+
 echo "=== Install and cold-launch the actual Debug APK ==="
 "$ADB" -s "$SERIAL" install -r -t app/build/outputs/apk/debug/app-debug.apk > "$OUTPUT/install.log" 2>&1
 "$ADB" -s "$SERIAL" shell am start -W -n com.swagdroid.debug/com.swagdroid.MainActivity > "$OUTPUT/launch.txt"
 grep -q 'Status: ok' "$OUTPUT/launch.txt" || { cat "$OUTPUT/launch.txt"; fail "Cold launch failed"; }
 
 echo "=== Install the already compiled instrumentation APKs ==="
-mapfile -t app_tests < <(find app/build/outputs/apk/androidTest -name '*.apk' -type f)
-mapfile -t vault_tests < <(find core/vault/build/outputs/apk/androidTest -name '*.apk' -type f)
-[[ "${#app_tests[@]}" == 1 && "${#vault_tests[@]}" == 1 ]] || fail "Expected one instrumentation APK for each smoke module"
 "$ADB" -s "$SERIAL" install -r -t "${vault_tests[0]}" > "$OUTPUT/test-install.log" 2>&1
 "$ADB" -s "$SERIAL" install -r -t "${app_tests[0]}" >> "$OUTPUT/test-install.log" 2>&1
 "$ADB" -s "$SERIAL" shell pm list instrumentation > "$OUTPUT/installed-runners.txt"
@@ -195,7 +214,7 @@ vault=[component for component,target in rows if component.startswith("com.swagd
 assert len(app)==1 and len(vault)==1, rows
 (root/"app-runner.txt").write_text(app[0])
 (root/"vault-runner.txt").write_text(vault[0])
-print("::notice title=Android runners::"+json.dumps({"app":app[0],"core:vault":vault[0],"transport":"adb am instrument; stock AndroidJUnitRunner"}))
+print("::notice title=Android runners::"+json.dumps({"app":app[0],"core:vault":vault[0],"transport":"adb am instrument; stock AndroidJUnitRunner","matchingDebugCertificateSha256":(root/"matching-certificate.txt").read_text()}))
 PYRUNNERS
 
 # Isolated XML output from the real runner protocol, distinct from Gradle UTP reports.

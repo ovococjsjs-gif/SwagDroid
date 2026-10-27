@@ -6,6 +6,7 @@
 
 - Одноразовый CI-эмулятор Android 15 / API 35, `google_apis`, x86_64, KVM.
 - Устанавливается настоящий Debug APK с production Hilt/Application/Compose-кодом.
+- Каталог AVD изолирован через `ANDROID_AVD_HOME`, но `ANDROID_USER_HOME` не меняется: он также влияет на debug-keystore Gradle. Перед запуском сверяются SHA-256 сертификатов target/test APK; signature check Android не обходится.
 - Shizuku/Root не подключаются. Физический телефон, другие API/OEM и Release APK во время этого smoke не проверяются.
 - Скрипт отказывается работать вне GitHub Actions или при наличии уже подключённого ADB-устройства. Для Gradle задан serial созданного эмулятора.
 - Тесту очистки выдаётся all-files access только на одноразовом эмуляторе. Он создаёт собственный UUID-каталог в Download, **не подтверждает удаление**, после отмены проверяет неизменность файла. В конце убирается только известный fixture, без рекурсивного удаления чужого содержимого.
@@ -40,7 +41,7 @@ bash scripts/android-smoke.sh
 Gradle компилирует настоящие instrumentation APK:
 
 ```bash
-./gradlew :app:assembleDebugAndroidTest :core:vault:assembleDebugAndroidTest --stacktrace --no-daemon
+./gradlew :app:assembleDebug :app:assembleDebugAndroidTest :core:vault:assembleDebugAndroidTest --stacktrace --no-daemon
 ```
 
 Собранные APK устанавливаются на созданный AVD. Их зарегистрированные компоненты `androidx.test.runner.AndroidJUnitRunner` определяются через `pm list instrumentation` и запускаются обычным `adb shell am instrument -w -r` с указанными тестовыми классами. Ни тесты, ни assertions не заменяются. Такой запуск не зависит от дополнительного host UTP runtime, загрузка которого остановила первый `connectedDebugAndroidTest` сетевой ошибкой после успешного запуска эмулятора.
