@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A disposable CI emulator only. Never selects a connected physical device.
-set -euo pipefail
+set -Eeuo pipefail
 cd "$(dirname "$0")/.."
 
 if [[ "${GITHUB_ACTIONS:-}" != "true" ]]; then
@@ -25,7 +25,7 @@ fail() { echo "::error title=Android smoke::$*"; exit 1; }
 
 collect_and_stop() {
   local status=$?
-  trap - EXIT INT TERM
+  trap - EXIT INT TERM ERR
   if [[ -n "$emulator_pid" ]]; then
     if [[ "$(timeout 5 "$ADB" -s "$SERIAL" get-state 2>/dev/null || true)" == "device" ]]; then
       timeout 10 "$ADB" -s "$SERIAL" logcat -b crash -d > "$OUTPUT/crash-logcat.txt" 2>&1 || true
@@ -43,10 +43,10 @@ from pathlib import Path
 root=Path(sys.argv[1])
 # Log download hosts may be unavailable to reviewers; publish bounded diagnostic text
 # through the ordinary check annotations instead of reporting only a generic timeout.
-for name in ("emulator.log", "crash-logcat.txt", "avd.log", "sdk-install.log", "tests.log"):
+for name in ("emulator.log", "emulator-version.txt", "acceleration.txt", "crash-logcat.txt", "avd.log", "host-packages.log", "sdk-install.log", "tests.log"):
     path=root/name
     if not path.exists(): continue
-    text="\n".join(path.read_text(errors="replace").splitlines()[-60:])[-7000:]
+    text="\n".join(path.read_text(errors="replace").splitlines()[-40:])[-3200:]
     if text:
         escaped=text.replace("%","%25").replace("\r","%0D").replace("\n","%0A")
         print(f"::warning title=Android diagnostics {name}::{escaped}")
@@ -57,6 +57,10 @@ PYDIAG
 trap collect_and_stop EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+trap 'echo "::error title=Android smoke shell::Unexpected exit at script line $LINENO (status $?)"' ERR
+
+# Qt's version probe and headless rendering must not require an X server.
+export QT_QPA_PLATFORM=offscreen
 
 echo "=== Compile instrumentation APKs before downloading/booting the emulator ==="
 if ! ./gradlew :app:assembleDebugAndroidTest :core:vault:assembleDebugAndroidTest --stacktrace --no-daemon > "$OUTPUT/compile.log" 2>&1; then
@@ -77,13 +81,20 @@ if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
   sudo -n chmod 666 /dev/kvm || fail "Cannot enable KVM access on the disposable CI runner"
 fi
 
+echo "=== Native headless emulator dependencies ==="
+if ! (sudo -n apt-get update -q && sudo -n apt-get install -y -q   libgl1 libpulse0 libnss3 libxcomposite1 libxcursor1 libxrandr2 libxi6 libxtst6   libxkbcommon0 libxkbcommon-x11-0 libxcb-cursor0 libasound2t64) > "$OUTPUT/host-packages.log" 2>&1; then
+  fail "Native emulator dependency installation failed"
+fi
+
 echo "=== Install Android 15 / API 35 emulator image ==="
 if ! timeout 900 "$SDKMANAGER" "platform-tools" "emulator" "$IMAGE" > "$OUTPUT/sdk-install.log" 2>&1; then
   tail -n 70 "$OUTPUT/sdk-install.log"
   fail "SDK/image installation failed"
 fi
 "$EMULATOR" -accel-check > "$OUTPUT/acceleration.txt" 2>&1 || { cat "$OUTPUT/acceleration.txt"; fail "Emulator acceleration check failed"; }
-"$EMULATOR" -version > "$OUTPUT/emulator-version.txt" 2>&1
+# Some emulator versions return non-zero for this informational flag. Do not turn
+# a version probe into a smoke failure; acceleration/boot/tests are the actual gates.
+"$EMULATOR" -version > "$OUTPUT/emulator-version.txt" 2>&1 || true
 python3 - "$OUTPUT" <<'PYENV'
 import json,sys
 from pathlib import Path
